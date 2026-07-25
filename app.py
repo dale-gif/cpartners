@@ -102,57 +102,82 @@ def result(job_id: str, request: Request) -> dict[str, str]:
 def whisper(req: WhisperRequest, request: Request) -> dict[str, Any]:
     """Download OpusClip MP4 -> extract compact mono MP3 -> POST to OpenAI Whisper.
 
-    Solves the 25 MB Whisper hard limit: a 12-min LF MP4 (~40 MB) becomes a
+    Solves the 25 MB Whisper hard limit: a 12-min LF MP4 (~232 MB) becomes a
     ~4 MB mono 48 kbps MP3 after extraction, well under the cap.
+
+    Key source, in order of preference:
+      1. OPENAI_API_KEY env var on the server (recommended)
+      2. Authorization: Bearer <key> header from the caller
+      3. x-openai-key header
     """
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing Bearer token in Authorization header")
-    openai_key = auth.split(" ", 1)[1].strip()
+    openai_key = (
+        os.environ.get("OPENAI_API_KEY")
+        or (request.headers.get("authorization", "").split(" ", 1)[-1].strip()
+            if request.headers.get("authorization", "").lower().startswith("bearer ") else "")
+        or request.headers.get("x-openai-key", "")
+    ).strip()
+    if not openai_key:
+        raise HTTPException(
+            status_code=401,
+            detail="No OpenAI key. Set OPENAI_API_KEY env var on the server, or pass Authorization: Bearer <key>, or x-openai-key: <key>.",
+        )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-        video_path = tmp_dir / "video.mp4"
-        audio_path = tmp_dir / "audio.mp3"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            video_path = tmp_dir / "video.mp4"
+            audio_path = tmp_dir / "audio.mp3"
 
-        with requests.get(req.opusClipUrl, stream=True, timeout=300) as r:
-            r.raise_for_status()
-            with open(video_path, "wb") as f:
-                shutil.copyfileobj(r.raw, f)
+            with requests.get(req.opusClipUrl, stream=True, timeout=300) as r:
+                r.raise_for_status()
+                with open(video_path, "wb") as f:
+                    shutil.copyfileobj(r.raw, f)
 
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-i", str(video_path),
-                    "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k",
-                    str(audio_path),
-                ],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"ffmpeg extract failed: {e.stderr.decode('utf-8', 'replace')[-500:]}",
-            )
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-i", str(video_path),
+                        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k",
+                        str(audio_path),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"ffmpeg extract failed: {e.stderr.decode('utf-8', 'replace')[-500:]}",
+                )
 
-        with open(audio_path, "rb") as f:
-            resp = requests.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {openai_key}"},
-                files={"file": ("audio.mp3", f, "audio/mpeg")},
-                data=[
-                    ("model", "whisper-1"),
-                    ("response_format", "verbose_json"),
-                    ("timestamp_granularities[]", "word"),
-                    ("timestamp_granularities[]", "segment"),
-                    ("language", "en"),
-                ],
-                timeout=600,
-            )
-        if not resp.ok:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return resp.json()
+            audio_bytes = audio_path.stat().st_size
+
+            with open(audio_path, "rb") as f:
+                resp = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {openai_key}"},
+                    files={"file": ("audio.mp3", f, "audio/mpeg")},
+                    data=[
+                        ("model", "whisper-1"),
+                        ("response_format", "verbose_json"),
+                        ("timestamp_granularities[]", "word"),
+                        ("timestamp_granularities[]", "segment"),
+                        ("language", "en"),
+                    ],
+                    timeout=600,
+                )
+            if not resp.ok:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"whisper API returned {resp.status_code}: {resp.text[:500]} (audio was {audio_bytes} bytes)",
+                )
+            return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {str(e)[:500]}",
+        )
 
 
 @app.get("/files/{job_id}.mp4")
