@@ -81,10 +81,11 @@ def composite(
         "-map", "[vout]",
         "-map", "0:a?",
         "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "18",
+        "-preset", "ultrafast",
+        "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
+        "-threads", "1",
         "-movflags", "+faststart",
         str(out_path),
     ]

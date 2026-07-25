@@ -1,6 +1,7 @@
 """FastAPI wrapper: exposes /render, /status, /result, /whisper for n8n to call."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -25,8 +26,36 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 app = FastAPI(title="GODTIER Render Server")
 
-JOBS: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
+
+
+def _state_path(job_id: str) -> Path:
+    return WORK_ROOT / job_id / "state.json"
+
+
+def _read_state(job_id: str) -> dict[str, Any] | None:
+    """Read job state from disk. Survives container restarts."""
+    path = _state_path(job_id)
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_state(job_id: str, **kw: Any) -> None:
+    """Merge kw into the job state on disk."""
+    with _lock:
+        path = _state_path(job_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        current = _read_state(job_id) or {}
+        current.update(kw)
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
+            json.dump(current, f)
+        tmp.replace(path)
 
 
 class RenderRequest(BaseModel):
@@ -39,13 +68,8 @@ class WhisperRequest(BaseModel):
     opusClipUrl: str = Field(..., description="OpusClip MP4 URL to transcribe")
 
 
-def _set(job_id: str, **kw: Any) -> None:
-    with _lock:
-        JOBS.setdefault(job_id, {}).update(kw)
-
-
 def _run(job_id: str, req: RenderRequest) -> None:
-    _set(job_id, status="running")
+    _write_state(job_id, status="running")
     try:
         out = render_job(
             job_id=job_id,
@@ -54,9 +78,9 @@ def _run(job_id: str, req: RenderRequest) -> None:
             work_root=WORK_ROOT,
             font_dir=FONT_DIR,
         )
-        _set(job_id, status="done", path=str(out))
+        _write_state(job_id, status="done", path=str(out))
     except Exception as e:
-        _set(
+        _write_state(
             job_id,
             status="error",
             error=str(e),
@@ -72,25 +96,31 @@ def root() -> dict[str, str]:
 @app.post("/render")
 def render(req: RenderRequest, background: BackgroundTasks) -> dict[str, str]:
     job_id = uuid.uuid4().hex[:12]
-    _set(job_id, status="queued", videoId=req.videoId)
+    _write_state(job_id, status="queued", videoId=req.videoId)
     background.add_task(_run, job_id, req)
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.get("/status")
 def status(job_id: str) -> dict[str, Any]:
-    with _lock:
-        job = JOBS.get(job_id)
-    if not job:
+    job = _read_state(job_id)
+    if job is None:
+        # Fallback: reconstruct status from the filesystem if state.json is
+        # gone but the job directory or output survived a restart.
+        job_dir = WORK_ROOT / job_id
+        final_mp4 = job_dir / "final.mp4"
+        if final_mp4.exists():
+            return {"job_id": job_id, "status": "done", "path": str(final_mp4)}
+        if job_dir.exists():
+            return {"job_id": job_id, "status": "running", "note": "recovered from disk"}
         raise HTTPException(status_code=404, detail="unknown job_id")
     return {"job_id": job_id, **job}
 
 
 @app.get("/result")
 def result(job_id: str, request: Request) -> dict[str, str]:
-    with _lock:
-        job = JOBS.get(job_id)
-    if not job:
+    job = _read_state(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="unknown job_id")
     if job.get("status") != "done":
         raise HTTPException(status_code=409, detail=f"job {job.get('status')}")
@@ -182,10 +212,9 @@ def whisper(req: WhisperRequest, request: Request) -> dict[str, Any]:
 
 @app.get("/files/{job_id}.mp4")
 def file(job_id: str) -> FileResponse:
-    with _lock:
-        job = JOBS.get(job_id) or {}
-    path = job.get("path")
-    if not path or not Path(path).exists():
+    job = _read_state(job_id) or {}
+    path = job.get("path") or str(WORK_ROOT / job_id / "final.mp4")
+    if not Path(path).exists():
         raise HTTPException(status_code=404, detail="file not ready")
     return FileResponse(
         path,
