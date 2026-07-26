@@ -88,6 +88,17 @@ def extract_audio(video: Path, audio: Path) -> None:
     log(f"audio → {audio} ({audio.stat().st_size / 1024:.1f} KB)")
 
 
+def video_duration(video: Path) -> float:
+    r = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(video),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    return float(r.stdout.strip())
+
+
 def whisper_transcribe(audio: Path) -> dict:
     with open(audio, "rb") as f:
         r = requests.post(
@@ -108,7 +119,16 @@ def whisper_transcribe(audio: Path) -> dict:
     return r.json()
 
 
-def claude_plan(transcript: dict) -> dict:
+def claude_plan(transcript: dict, duration: float) -> dict:
+    user_msg = (
+        f"Here is the Whisper verbose_json for this video.\n\n"
+        f"VIDEO_DURATION_SECONDS: {duration:.1f}\n\n"
+        f"HARD CONSTRAINT: every timestamp you emit MUST be a number between "
+        f"0 and {duration:.1f}. Distribute the 3 infographics and 3 text "
+        f"overlays evenly across that range. Do not use timestamps past "
+        f"{duration:.1f}s — the video ends there.\n\n"
+        f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
+    )
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -120,16 +140,7 @@ def claude_plan(transcript: dict) -> dict:
             "model": "claude-opus-4-5",
             "max_tokens": 4096,
             "system": CLAUDE_SYSTEM,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        "Here is the Whisper verbose_json for this LF. Produce "
-                        "the GODTIER plan JSON now.\n\nTRANSCRIPT_JSON:\n"
-                        + json.dumps(transcript)
-                    ),
-                }
-            ],
+            "messages": [{"role": "user", "content": user_msg}],
         },
         timeout=300,
     )
@@ -139,7 +150,23 @@ def claude_plan(transcript: dict) -> dict:
     first, last = text.find("{"), text.rfind("}")
     if first == -1 or last == -1:
         raise RuntimeError("No JSON object in Claude output")
-    return json.loads(text[first : last + 1])
+    plan = json.loads(text[first : last + 1])
+
+    # Safety net: drop anything past the end. Log what we drop.
+    def _in_range(items: list, kind: str) -> list:
+        kept, dropped = [], []
+        for it in items or []:
+            ts = float(it.get("timestamp", -1))
+            if 0 <= ts < duration:
+                kept.append(it)
+            else:
+                dropped.append(ts)
+        if dropped:
+            log(f"dropped {len(dropped)} {kind} outside 0..{duration:.1f}s: {dropped}")
+        return kept
+    plan["infographics"] = _in_range(plan.get("infographics"), "infographics")
+    plan["text_overlays"] = _in_range(plan.get("text_overlays"), "text_overlays")
+    return plan
 
 
 def build_assets(plan: dict) -> list[TimedAsset]:
@@ -186,15 +213,24 @@ def main() -> None:
     log("[2/5] extract audio")
     extract_audio(video, audio)
 
+    duration = video_duration(video)
+    log(f"video duration: {duration:.1f}s")
+
     log("[3/5] whisper transcription")
     transcript = whisper_transcribe(audio)
     (WORK / "whisper.json").write_text(json.dumps(transcript))
 
     log("[4/5] claude planner")
-    plan = claude_plan(transcript)
+    plan = claude_plan(transcript, duration)
     (WORK / "plan.json").write_text(json.dumps(plan, indent=2))
     log(f"plan: {len(plan.get('infographics') or [])} cards, "
         f"{len(plan.get('text_overlays') or [])} overlays")
+    for i, c in enumerate(plan.get("infographics") or []):
+        log(f"  card {i}: t={c.get('timestamp')}s title={c.get('title')!r} "
+            f"items={c.get('items')}")
+    for i, ov in enumerate(plan.get("text_overlays") or []):
+        log(f"  overlay {i}: t={ov.get('timestamp')}s style={ov.get('style')!r} "
+            f"lines={ov.get('lines')}")
 
     log("[5/5] composite")
     assets = build_assets(plan)
