@@ -40,28 +40,8 @@ def _load_font(font_dir: Path, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-def _draw_black_gradient(img: Image.Image) -> None:
-    """Left-anchored black gradient that fades to transparent on the right.
-
-    Solid black covers the left 60% (comfortably behind Larry's frame-left
-    text zone). Ramps to transparent between 60% and 92%. This keeps text
-    fully readable on any background Stacey is filmed against.
-    """
-    w, h = img.size
-    grad = Image.new("L", (w, 1), 0)
-    for x in range(w):
-        if x < w * 0.60:
-            alpha = 235
-        elif x < w * 0.92:
-            t = (x - w * 0.60) / (w * 0.32)
-            alpha = int(235 * (1 - t))
-        else:
-            alpha = 0
-        grad.putpixel((x, 0), alpha)
-    grad = grad.resize((w, h))
-    black_layer = Image.new("RGBA", (w, h), (0, 0, 0, 255))
-    black_layer.putalpha(grad)
-    img.alpha_composite(black_layer)
+# _draw_black_gradient removed — Larry's approved style is clean white text
+# on a fully-transparent overlay (no background box, no gradient, no shadow).
 
 
 def render_overlay(
@@ -72,27 +52,23 @@ def render_overlay(
 ) -> Path:
     """Render one text-overlay PNG. Returns the PNG path.
 
+    Larry-approved style: clean bold WHITE text on a fully-transparent canvas
+    — no black-gradient background, no shadow, no box. The text sits directly
+    over Stacey (frame-left, safe zone). Style parameter is accepted for
+    back-compat but ignored — everything renders the same clean way.
+
     Auto-shrinks the font so the longest line fits within the canvas width.
     Keeps the "Rule of 3": always renders 3 lines (pads with blanks).
     """
+    _ = style  # intentionally unused; kept for back-compat
     img = Image.new("RGBA", (OVERLAY_W, OVERLAY_H), TRANSPARENT)
-
-    if style == "black-gradient":
-        _draw_black_gradient(img)
-
     draw = ImageDraw.Draw(img)
 
     # Normalize to exactly 3 lines
     padded = (list(lines) + ["", "", ""])[:3]
 
-    # Auto-shrink font so every line fits within the readable area.
-    # For 'black-gradient' the black fill only covers the left ~55% of the
-    # canvas (fades to transparent after), so text must fit inside that zone.
-    # For 'white' the whole canvas is a clean overlay so more width is usable.
-    if style == "black-gradient":
-        max_width = int(OVERLAY_W * 0.5) - MARGIN
-    else:
-        max_width = int(OVERLAY_W * 0.85) - MARGIN
+    # Auto-shrink font so every line fits within the canvas width
+    max_width = OVERLAY_W - 2 * MARGIN
     size = FONT_SIZE
     font = _load_font(font_dir, size)
     while size > 40:
@@ -102,9 +78,7 @@ def render_overlay(
         size -= 4
         font = _load_font(font_dir, size)
 
-    # Anchor text to TOP of canvas so it stays above OpusClip's caption band
-    # once composited. The overlay is placed at (OVERLAY_X, OVERLAY_Y) in the
-    # frame; keeping text near y=40 in the canvas gives predictable framing.
+    # Top-anchored inside the canvas so it stays above OpusClip's caption band
     y = 40
     for line in padded:
         draw.text((MARGIN, y), line, font=font, fill=WHITE)

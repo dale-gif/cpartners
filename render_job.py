@@ -84,8 +84,8 @@ CLAUDE_SYSTEM = (
     "  timestamp : seconds — when the line lands.\n"
     "  hold      : seconds — how long the text stays up. Typical 4-8s. "
     "              Long enough to read, short enough to feel like a beat.\n"
-    "Style: 'white' (white text over Stacey) or 'black-gradient' (white text "
-    "on black gradient blended into her).\n\n"
+    "Style: always 'white' — clean bold white text over Stacey, no background "
+    "box, no gradient. Larry-approved.\n\n"
     "FRAME: infographic fills the frame (cutaway from Stacey). Text overlays "
     "land frame-left with Stacey visible frame-right.\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
@@ -101,7 +101,7 @@ CLAUDE_SYSTEM = (
     "\"text_overlays\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
     "\"lines\":[\"LINE 1\",\"LINE 2\",\"LINE 3\"],"
-    "\"style\":\"white|black-gradient\"}"
+    "\"style\":\"white\"}"
     "]}"
 )
 
