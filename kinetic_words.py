@@ -4,13 +4,13 @@ Design rules (Larry-approved reference):
 - Rule of 3: exactly three lines. Extras clip; shorter is padded.
 - Plain text: no varied sizes, no italics, no cascade.
 - Inter 800 bold, WHITE, top-left.
-- FULL-FRAME letterbox treatment while the overlay is on screen:
-    * subtle 24% darken over the whole frame (Stacey still clearly visible)
+- Letterbox treatment while the overlay is on screen:
+    * subtle 24% darken across the top of the frame ONLY (up to y=880)
     * solid thin black bar top (~40px letterbox line)
-    * semi-transparent black bar bottom (~180px, mutes but does not hide
-      OpusClip's baked-in caption band)
+    * NO bottom bar — the OpusClip caption band (y=880..1080) stays fully
+      clean and bright, unmuted by the overlay
 - Two styles accepted:
-    * "black-gradient" (DEFAULT): the full-frame letterbox treatment above
+    * "black-gradient" (DEFAULT): the letterbox treatment above
     * "white":          clean white text with no darkening at all
 """
 from __future__ import annotations
@@ -33,11 +33,11 @@ LINE_GAP = 25
 WHITE = (255, 255, 255, 255)
 TRANSPARENT = (0, 0, 0, 0)
 
-# Full-frame letterbox tuning
-DARKEN_ALPHA = 60        # ~24% black over whole frame
-TOP_BAR_H = 40           # solid thin letterbox line
-BOTTOM_BAR_H = 180       # covers OpusClip caption zone
-BOTTOM_BAR_ALPHA = 200   # semi-transparent — mutes but doesn't hide caption
+# Letterbox tuning — the caption zone (y=CAPTION_ZONE_Y..OVERLAY_H) is left
+# completely untouched so OpusClip's baked-in captions stay bright and clean.
+DARKEN_ALPHA = 60        # ~24% black over content area only
+TOP_BAR_H = 40           # solid thin letterbox line at very top
+CAPTION_ZONE_Y = 880     # y at which the OpusClip caption band begins
 
 _DEJAVU_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -54,17 +54,20 @@ def _load_font(font_dir: Path, size: int) -> ImageFont.FreeTypeFont:
 
 
 def _draw_letterbox(img: Image.Image) -> None:
-    """Larry-approved full-frame letterbox: soft darken + top/bottom bars."""
-    w, h = img.size
-    # Subtle full-frame darken — keeps Stacey visible, gives text contrast
-    darken = Image.new("RGBA", (w, h), (0, 0, 0, DARKEN_ALPHA))
-    img.alpha_composite(darken)
-    # Solid thin letterbox line at top
+    """Larry-approved letterbox: soft darken above the caption zone + top bar.
+
+    Explicitly does NOT touch the OpusClip caption band at the bottom — that
+    zone (y >= CAPTION_ZONE_Y) stays fully transparent so captions render
+    bright and unmuted, matching Larry's approved reference.
+    """
+    w, _h = img.size
+    # Subtle darken across the content area only (top of frame up to caption
+    # zone). Bottom band is untouched.
+    darken = Image.new("RGBA", (w, CAPTION_ZONE_Y), (0, 0, 0, DARKEN_ALPHA))
+    img.alpha_composite(darken, (0, 0))
+    # Solid thin letterbox line at very top
     top_bar = Image.new("RGBA", (w, TOP_BAR_H), (0, 0, 0, 255))
     img.alpha_composite(top_bar, (0, 0))
-    # Semi-transparent bar at bottom so OpusClip caption bleeds through muted
-    bottom_bar = Image.new("RGBA", (w, BOTTOM_BAR_H), (0, 0, 0, BOTTOM_BAR_ALPHA))
-    img.alpha_composite(bottom_bar, (0, h - BOTTOM_BAR_H))
 
 
 def render_overlay(
