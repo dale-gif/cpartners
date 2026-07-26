@@ -137,7 +137,7 @@ def composite(
                 "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
                        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-                "-pix_fmt", "yuv420p", "-c:a", "copy", "-threads", "1",
+                "-pix_fmt", "yuv420p", "-c:a", "copy",
                 "-movflags", "+faststart",
                 str(out_path),
             ],
@@ -145,9 +145,14 @@ def composite(
         )
         return out_path
 
+    # Cap each image stream so it only decodes long enough to cover its
+    # enable window (start + hold + FADE tail). Without a cap, `-loop 1`
+    # would decode a static image for the WHOLE video for every asset —
+    # e.g. 9 assets on a 10-min video = 90 min of wasted decode work.
     cmd: list[str] = ["ffmpeg", "-y", "-i", str(base_video)]
     for a in assets:
-        cmd += ["-loop", "1", "-i", str(a.png)]
+        stream_len = a.start + a.hold + FADE + 0.5
+        cmd += ["-loop", "1", "-t", f"{stream_len:.3f}", "-i", str(a.png)]
 
     cmd += [
         "-filter_complex", _build_filter_complex(assets),
@@ -158,7 +163,6 @@ def composite(
         "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
-        "-threads", "1",
         "-shortest",
         "-movflags", "+faststart",
         str(out_path),
