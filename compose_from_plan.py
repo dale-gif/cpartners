@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-INFOGRAPHIC_HOLD = 7.0
+INFOGRAPHIC_HOLD = 20.0  # default cards stay long enough for a full explanation
 OVERLAY_HOLD = 5.0
 FADE = 0.5
 
@@ -29,8 +29,11 @@ SCALE = 1.0  # overlays and infographics are authored at 1920x1080 natively
 # Frame-left positioning against a 1920x1080 canvas
 INFOGRAPHIC_X = 0
 INFOGRAPHIC_Y = 0
+# Overlay lands near top-left so text stays clear of OpusClip's bottom caption
+# band. Combined with top-anchored text at canvas y=60 (see kinetic_words),
+# text renders at frame y ≈ 130-680, always above the caption zone.
 OVERLAY_X = 60
-OVERLAY_Y = 200
+OVERLAY_Y = 60
 
 
 @dataclass

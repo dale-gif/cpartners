@@ -40,16 +40,20 @@ def _load_font(font_dir: Path, size: int) -> ImageFont.FreeTypeFont:
 
 
 def _draw_black_gradient(img: Image.Image) -> None:
-    """Left-anchored black gradient that fades to transparent on the right."""
+    """Left-anchored black gradient that fades to transparent on the right.
+
+    Solid black covers the left 60% (comfortably behind Larry's frame-left
+    text zone). Ramps to transparent between 60% and 92%. This keeps text
+    fully readable on any background Stacey is filmed against.
+    """
     w, h = img.size
     grad = Image.new("L", (w, 1), 0)
     for x in range(w):
-        # Full black on the left third, ramp to 0 across the middle third
-        if x < w * 0.55:
-            alpha = 230
-        elif x < w * 0.9:
-            t = (x - w * 0.55) / (w * 0.35)
-            alpha = int(230 * (1 - t))
+        if x < w * 0.60:
+            alpha = 235
+        elif x < w * 0.92:
+            t = (x - w * 0.60) / (w * 0.32)
+            alpha = int(235 * (1 - t))
         else:
             alpha = 0
         grad.putpixel((x, 0), alpha)
@@ -97,9 +101,10 @@ def render_overlay(
         size -= 4
         font = _load_font(font_dir, size)
 
-    total_h = size * 3 + LINE_GAP * 2
-    y = (OVERLAY_H - total_h) // 2
-
+    # Anchor text to TOP of canvas so it stays above OpusClip's caption band
+    # once composited. The overlay is placed at (OVERLAY_X, OVERLAY_Y) in the
+    # frame; keeping text near y=60 in the canvas gives predictable framing.
+    y = 60
     for line in padded:
         draw.text((MARGIN, y), line, font=font, fill=WHITE)
         y += size + LINE_GAP

@@ -54,6 +54,12 @@ CLAUDE_SYSTEM = (
     "WAYS TO GET PAID') or use countless framings ('WHY THEY DON'T PAY', "
     "'PATHWAYS TO GET PAID', 'WHAT GOOD LOOKS LIKE').\n\n"
     "INFOGRAPHIC SCHEMA (per moment):\n"
+    "  timestamp      : seconds — when Stacey STARTS explaining this concept.\n"
+    "  hold           : seconds — how long the card stays up. Match how long "
+    "                  Stacey spends on this concept. Typical: 15-30 seconds "
+    "                  for a multi-part explanation, up to 40s if she goes deep. "
+    "                  The card should stay on-screen for the WHOLE discussion, "
+    "                  not just the moment she introduces it.\n"
     "  overall_title  : 1-3 words CAPS, <= 22 chars. Example: WHY THEY DON'T PAY\n"
     "  subtitle       : short CAPS phrase, <= 40 chars. Example: IT IS A CHOICE, NOT AN ACCIDENT\n"
     "  template       : PICK ONE — see TEMPLATES below\n"
@@ -71,13 +77,17 @@ CLAUDE_SYSTEM = (
     "<=14 chars. Punchy. Rule of 3. Break aggressively: "
     "'THE RELATIONSHIP IS DAMAGED YOU FEEL IT' becomes "
     "['RELATIONSHIP', 'ALREADY DAMAGED', 'YOU FEEL IT']. "
+    "  timestamp : seconds — when the line lands.\n"
+    "  hold      : seconds — how long the text stays up. Typical 4-8s. "
+    "              Long enough to read, short enough to feel like a beat.\n"
     "Style: 'white' (white text over Stacey) or 'black-gradient' (white text "
     "on black gradient blended into her).\n\n"
     "FRAME: infographic fills the frame (cutaway from Stacey). Text overlays "
     "land frame-left with Stacey visible frame-right.\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
     "{\"infographics\":["
-    "{\"timestamp\":<seconds>,\"template\":\"three-cards|three-columns|timeline|"
+    "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
+    "\"template\":\"three-cards|three-columns|timeline|"
     "numbered-list|circle-diagram|problem-solution|checklist\","
     "\"overall_title\":\"CAPS\",\"subtitle\":\"CAPS\","
     "\"cards\":[{\"title\":\"CAPS\",\"description\":\"CAPS\"},"
@@ -85,7 +95,8 @@ CLAUDE_SYSTEM = (
     "{\"title\":\"CAPS\",\"description\":\"CAPS\"}]}"
     "],"
     "\"text_overlays\":["
-    "{\"timestamp\":<seconds>,\"lines\":[\"LINE 1\",\"LINE 2\",\"LINE 3\"],"
+    "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
+    "\"lines\":[\"LINE 1\",\"LINE 2\",\"LINE 3\"],"
     "\"style\":\"white|black-gradient\"}"
     "]}"
 )
@@ -96,10 +107,14 @@ LF_MIN_SECONDS = 360.0  # 6 min
 
 
 def detect_format(duration: float) -> tuple[str, int, int]:
-    """Return (format_label, infographic_count, text_overlay_count)."""
+    """Return (format_label, infographic_count, text_overlay_count).
+
+    MF (< 6 min): 2 cards + 3 text overlays.
+    LF (≥ 6 min): 3 cards + 6 text overlays.
+    """
     if duration < LF_MIN_SECONDS:
-        return "MF", 2, 2
-    return "LF", 3, 3
+        return "MF", 2, 3
+    return "LF", 3, 6
 
 
 def log(msg: str) -> None:
