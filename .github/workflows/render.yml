@@ -1,4 +1,4 @@
-name: GODTIER Render
+name: CRP MF LF Render
 
 on:
   repository_dispatch:
@@ -37,11 +37,9 @@ jobs:
           curl -fsSL -o /tmp/inter.zip \
             "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip"
           unzip -q /tmp/inter.zip -d /tmp/inter
-          # v4.0 puts TTFs in "Inter Desktop/" (with a space). Copy from wherever they are.
           find /tmp/inter -type f -name 'Inter-Regular.ttf'   -exec cp {} fonts/ \;
           find /tmp/inter -type f -name 'Inter-Black.ttf'     -exec cp {} fonts/ \;
           find /tmp/inter -type f -name 'Inter-ExtraBold.ttf' -exec cp {} fonts/ \;
-          echo "---- fonts/ contents ----"
           ls -la fonts/
 
       - name: Install Python deps
@@ -64,7 +62,6 @@ jobs:
         if: always()
         run: |
           mkdir -p out
-          # copy every generated overlay PNG + the plan JSON into the release payload
           cp work/*.png       out/ 2>/dev/null || true
           cp work/plan.json   out/ 2>/dev/null || true
 
@@ -72,11 +69,12 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: godtier-${{ github.run_id }}
-          name: GODTIER ${{ github.event.client_payload.videoId || inputs.videoId }}
+          tag_name: crp-render-${{ github.run_id }}
+          name: CRP MF LF Render — ${{ github.event.client_payload.videoId || inputs.videoId }}
           body: |
-            GODTIER-composited video for `${{ github.event.client_payload.videoId || inputs.videoId }}`.
-            Attached: final MP4 + intermediate overlay PNGs + plan.json for inspection.
+            CRP MF LF Render output for `${{ github.event.client_payload.videoId || inputs.videoId }}`.
+            Attached: final 1080p MP4 + intermediate overlay PNGs + plan.json.
+            Triggered by run id `${{ github.run_id }}`.
           files: |
             out/*.mp4
             out/*.png
@@ -86,6 +84,6 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "## GODTIER Render — ${{ github.event.client_payload.videoId || inputs.videoId }}" >> $GITHUB_STEP_SUMMARY
+          echo "## CRP MF LF Render — ${{ github.event.client_payload.videoId || inputs.videoId }}" >> $GITHUB_STEP_SUMMARY
           echo "- Filename: ${{ steps.render.outputs.filename || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Release: ${{ steps.release.outputs.url || 'n/a' }}" >> $GITHUB_STEP_SUMMARY

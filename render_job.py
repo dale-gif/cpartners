@@ -103,7 +103,7 @@ def detect_format(duration: float) -> tuple[str, int, int]:
 
 
 def log(msg: str) -> None:
-    print(f"[godtier] {msg}", flush=True)
+    print(f"[crp-render] {msg}", flush=True)
 
 
 def download_video(url: str, out: Path) -> None:
@@ -284,7 +284,7 @@ def main() -> None:
 
     # Rename to the target filename and put it at a stable location the
     # workflow YAML picks up for the Release upload step.
-    filename = f"{VIDEO_ID}_GODTIER.mp4"
+    filename = f"{VIDEO_ID}_CRP_MFLF.mp4"
     out = Path("out") / filename
     out.parent.mkdir(exist_ok=True)
     final.rename(out)

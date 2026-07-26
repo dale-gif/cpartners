@@ -19,9 +19,10 @@ OVERLAY_HOLD = 5.0
 FADE = 0.5
 
 # Target output resolution; base video and overlays are scaled to fit.
-TARGET_W = 1280
-TARGET_H = 720
-SCALE = TARGET_H / 1080  # 0.667 — factor to shrink 1080p-sourced overlays
+# GitHub Actions runners (7GB RAM) handle 1080p ffmpeg composite comfortably.
+TARGET_W = 1920
+TARGET_H = 1080
+SCALE = 1.0  # overlays and infographics are authored at 1920x1080 natively
 
 # Frame-left positioning against a 1920x1080 canvas; scaled at composite time
 INFOGRAPHIC_X = 80
