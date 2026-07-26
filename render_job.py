@@ -84,8 +84,9 @@ CLAUDE_SYSTEM = (
     "  timestamp : seconds — when the line lands.\n"
     "  hold      : seconds — how long the text stays up. Typical 4-8s. "
     "              Long enough to read, short enough to feel like a beat.\n"
-    "Style: always 'white' — clean bold white text over Stacey, no background "
-    "box, no gradient. Larry-approved.\n\n"
+    "Style: always 'black-gradient' — full-frame letterbox treatment "
+    "(thin top bar, muted bottom bar, subtle full-frame darken) with clean "
+    "white bold text frame-left. Larry-approved.\n\n"
     "FRAME: infographic fills the frame (cutaway from Stacey). Text overlays "
     "land frame-left with Stacey visible frame-right.\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
@@ -101,7 +102,7 @@ CLAUDE_SYSTEM = (
     "\"text_overlays\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
     "\"lines\":[\"LINE 1\",\"LINE 2\",\"LINE 3\"],"
-    "\"style\":\"white\"}"
+    "\"style\":\"black-gradient\"}"
     "]}"
 )
 
@@ -248,7 +249,7 @@ def build_assets(plan: dict) -> list[TimedAsset]:
     for i, ov in enumerate(plan.get("text_overlays") or []):
         png = render_overlay(
             lines=list(ov.get("lines") or []),
-            style=(ov.get("style") or "white"),
+            style=(ov.get("style") or "black-gradient"),
             font_dir=FONT_DIR,
             out_path=WORK / f"overlay_{i}.png",
         )

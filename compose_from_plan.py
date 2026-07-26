@@ -46,10 +46,13 @@ INFOGRAPHIC_TARGET_H = 900
 INFOGRAPHIC_X = 0
 INFOGRAPHIC_Y = 0
 
-# Text overlays land in the safe zone (frame-left, Stacey visible right).
-# PNGs are authored at 900x760 (exact safe zone), no scaling required.
-OVERLAY_X = SAFE_X
-OVERLAY_Y = SAFE_Y
+# Text overlays are FULL-FRAME PNGs (1920x1080) with a Larry-approved
+# letterbox treatment: subtle full-frame darken, solid thin top bar, and a
+# semi-transparent bottom bar that mutes OpusClip's baked-in caption band.
+# The text itself lives frame-left inside the safe zone; Stacey remains
+# visible frame-right through the soft darken.
+OVERLAY_X = 0
+OVERLAY_Y = 0
 
 
 @dataclass
