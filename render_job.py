@@ -72,7 +72,7 @@ CLAUDE_SYSTEM = (
     "TEMPLATES (pick the one that best fits the beat):\n"
     "  * three-cards      — DEFAULT. 3 bordered cards side-by-side. Use for lists, principles, categories.\n"
     "  * three-columns    — 3 columns with a simple icon, no boxes. Use for tips or benefits.\n"
-    "  * timeline         — 3 numbered circles connected by a line. Use for sequential steps or a journey.\n"
+    "  * timeline         — 3 numbered SQUARES side-by-side (no connecting line). Use for sequential steps or a journey.\n"
     "  * numbered-list    — Vertical 01/02/03 rows. Use for instructions or ranked items.\n"
     "  * circle-diagram   — 3-segment ring + labels. Use for parts of a whole or overlapping ideas.\n"
     "  * problem-solution — Problem → Cause → Solution boxes with arrows. Use for issue analysis.\n"

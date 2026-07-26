@@ -6,7 +6,7 @@ on black, with the Larry-approved "clean, professional, reusable" aesthetic.
 Templates dispatched by spec.template:
   1. three-cards      — 3 bordered cards side-by-side (Larry's approved default)
   2. three-columns    — 3 columns with a simple icon on top, no boxes
-  3. timeline         — 3 numbered circles connected with lines
+  3. timeline         — 3 numbered SQUARES side-by-side (no connecting line)
   4. numbered-list    — vertical numbered list (01/02/03 rows)
   5. circle-diagram   — 3-segment ring with labels around it
   6. problem-solution — problem → cause → solution flow with icon boxes
@@ -203,7 +203,7 @@ def _render_three_columns(spec: dict, font_dir: Path, out_path: Path) -> Path:
     return out_path
 
 
-# ---- Template 3: timeline (3 circles connected by lines) ------------------
+# ---- Template 3: timeline (3 numbered SQUARES, no connecting line) --------
 
 def _render_timeline(spec: dict, font_dir: Path, out_path: Path) -> Path:
     img, draw = _new_canvas()
@@ -212,33 +212,33 @@ def _render_timeline(spec: dict, font_dir: Path, out_path: Path) -> Path:
                      spec.get("subtitle") or "")
     cards = _normalize_cards(spec, 3)
     center_y = max(body_y + 120, 500)
-    r = 80
+    half = 80  # square half-size (160x160 outer)
     x_positions = [CANVAS_W // 4, CANVAS_W // 2, 3 * CANVAS_W // 4]
-    # Connecting line
-    draw.line([(x_positions[0], center_y), (x_positions[2], center_y)],
-              fill=WHITE, width=4)
     for i, cx in enumerate(x_positions):
-        # White circle
+        # White square outline (4px stroke)
         for w in range(4):
-            draw.ellipse([cx - r + w, center_y - r + w,
-                          cx + r - w, center_y + r - w], outline=WHITE)
-        # Number inside
+            draw.rectangle(
+                [cx - half + w, center_y - half + w,
+                 cx + half - w, center_y + half - w],
+                outline=WHITE,
+            )
+        # Number inside the square
         num_font = _load_font(font_dir, "Black", 70)
         num = f"{i+1:02d}"
         nb = draw.textbbox((0, 0), num, font=num_font)
         draw.text((cx - (nb[2] - nb[0]) // 2, center_y - (nb[3] - nb[1]) // 2 - 5),
                   num, font=num_font, fill=WHITE)
-        # Title under circle
+        # Title under square
         title = (cards[i].get("title") or "").upper().strip()
         if title:
             tfont, tsize = _shrink_to_fit(draw, title, "Black", font_dir, CANVAS_W // 4, 60)
             tw = draw.textbbox((0, 0), title, font=tfont)[2]
-            draw.text((cx - tw // 2, center_y + r + 40), title, font=tfont, fill=WHITE)
+            draw.text((cx - tw // 2, center_y + half + 40), title, font=tfont, fill=WHITE)
         # Desc under title
         desc = (cards[i].get("description") or "").upper().strip()
         if desc:
             dfont = _load_font(font_dir, "Regular", 32)
-            y = center_y + r + 130
+            y = center_y + half + 130
             for line in _wrap(desc, dfont, draw, CANVAS_W // 4 - 40)[:3]:
                 lw = draw.textbbox((0, 0), line, font=dfont)[2]
                 draw.text((cx - lw // 2, y), line, font=dfont, fill=GREY)
