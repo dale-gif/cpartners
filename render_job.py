@@ -89,6 +89,15 @@ CLAUDE_SYSTEM = (
     "white bold text frame-left. Larry-approved.\n\n"
     "FRAME: infographic fills the frame (cutaway from Stacey). Text overlays "
     "land frame-left with Stacey visible frame-right.\n\n"
+    "OUTRO (HARD): the last 15 seconds of the video are the CRP outro "
+    "(\"DM US TODAY\" + disclaimer). NEVER place an infographic or text "
+    "overlay whose (timestamp + hold) crosses into the last 15s. Keep every "
+    "moment fully clear of that zone.\n\n"
+    "HOOK OVERLAY (HARD): exactly ONE text overlay MUST land in the first 20 "
+    "seconds. Pick the sentiment peak of the opening beat — the punchiest "
+    "1-3 word phrase Stacey says early (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', "
+    "'STOP GUESSING'). Break into 3 lines of 1-3 words each using the Rule "
+    "of 3 (e.g. ['DON\\'T', 'WAIT', 'ACT NOW']).\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
     "{\"infographics\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
@@ -109,6 +118,14 @@ CLAUDE_SYSTEM = (
 # Duration thresholds for auto-format detection (seconds).
 # CRP formats: MF = medium form (3-6 min), LF = long form (6-12 min).
 LF_MIN_SECONDS = 360.0  # 6 min
+
+# Reserve the last N seconds for CRP's outro card ("DM US TODAY" + disclaimer).
+# No overlay or infographic may extend into this zone.
+OUTRO_RESERVED_SECONDS = 15.0
+
+# Every clip must have at least one punchy text overlay ("hook") landing in
+# the first N seconds, capturing the sentiment peak of the opening beat.
+HOOK_WINDOW_SECONDS = 20.0
 
 
 def detect_format(duration: float) -> tuple[str, int, int]:
@@ -181,16 +198,26 @@ def whisper_transcribe(audio: Path) -> dict:
 
 def claude_plan(transcript: dict, duration: float, fmt: str,
                 infographic_count: int, overlay_count: int) -> dict:
+    safe_end = max(0.0, duration - OUTRO_RESERVED_SECONDS)
     user_msg = (
         f"Here is the Whisper verbose_json for this video.\n\n"
         f"VIDEO_FORMAT: {fmt}\n"
-        f"VIDEO_DURATION_SECONDS: {duration:.1f}\n\n"
+        f"VIDEO_DURATION_SECONDS: {duration:.1f}\n"
+        f"OUTRO_STARTS_AT_SECONDS: {safe_end:.1f}  "
+        f"(last {OUTRO_RESERVED_SECONDS:.0f}s is CRP outro — NEVER overlap it)\n"
+        f"HOOK_WINDOW_SECONDS: 0..{HOOK_WINDOW_SECONDS:.0f}  "
+        f"(exactly ONE text overlay must land in this window)\n\n"
         f"OUTPUT COUNTS FOR THIS {fmt}: exactly {infographic_count} infographic "
         f"moments and exactly {overlay_count} text overlay moments.\n\n"
-        f"HARD CONSTRAINT: every timestamp you emit MUST be a number between "
-        f"0 and {duration:.1f}. Distribute the {infographic_count} infographics "
-        f"and {overlay_count} text overlays evenly across that range. Do not "
-        f"use timestamps past {duration:.1f}s — the video ends there.\n\n"
+        f"HARD CONSTRAINTS:\n"
+        f"  * Every (timestamp + hold) MUST be <= {safe_end:.1f}. No item may "
+        f"cross into the outro zone.\n"
+        f"  * Exactly one of the {overlay_count} text overlays MUST have "
+        f"timestamp < {HOOK_WINDOW_SECONDS:.0f} (the opening hook). Capture "
+        f"the sentiment peak in 1-3 words per line.\n"
+        f"  * Distribute the remaining {infographic_count} infographics and "
+        f"{overlay_count - 1} body overlays evenly across "
+        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
     )
     r = requests.post(
@@ -216,20 +243,46 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         raise RuntimeError("No JSON object in Claude output")
     plan = json.loads(text[first : last + 1])
 
-    # Safety net: drop anything past the end. Log what we drop.
-    def _in_range(items: list, kind: str) -> list:
-        kept, dropped = [], []
+    # Safety net: drop anything that would land on top of the outro. For items
+    # that start before the outro but would run past it, clip the hold so the
+    # overlay fades out cleanly before the outro card appears. Log everything
+    # we drop or clip.
+    safe_end = max(0.0, duration - OUTRO_RESERVED_SECONDS)
+
+    def _guard(items: list, kind: str, default_hold: float) -> list:
+        kept, dropped, clipped = [], [], []
         for it in items or []:
             ts = float(it.get("timestamp", -1))
-            if 0 <= ts < duration:
-                kept.append(it)
-            else:
+            hold = float(it.get("hold", default_hold))
+            if ts < 0 or ts >= safe_end:
                 dropped.append(ts)
+                continue
+            end = ts + hold
+            if end > safe_end:
+                new_hold = max(1.0, safe_end - ts)
+                it["hold"] = new_hold
+                clipped.append((ts, hold, new_hold))
+            kept.append(it)
         if dropped:
-            log(f"dropped {len(dropped)} {kind} outside 0..{duration:.1f}s: {dropped}")
+            log(f"dropped {len(dropped)} {kind} outside 0..{safe_end:.1f}s "
+                f"(reserved last {OUTRO_RESERVED_SECONDS:.0f}s for outro): {dropped}")
+        if clipped:
+            log(f"clipped {len(clipped)} {kind} to avoid outro: {clipped}")
         return kept
-    plan["infographics"] = _in_range(plan.get("infographics"), "infographics")
-    plan["text_overlays"] = _in_range(plan.get("text_overlays"), "text_overlays")
+
+    plan["infographics"] = _guard(plan.get("infographics"), "infographics", INFOGRAPHIC_HOLD)
+    plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays", OVERLAY_HOLD)
+
+    hook_count = sum(
+        1 for ov in plan["text_overlays"]
+        if float(ov.get("timestamp", 999)) < HOOK_WINDOW_SECONDS
+    )
+    if hook_count == 0:
+        log(f"WARNING: no hook overlay in first {HOOK_WINDOW_SECONDS:.0f}s "
+            f"(Claude should have placed one — check prompt output)")
+    elif hook_count > 1:
+        log(f"note: {hook_count} overlays landed in the hook window "
+            f"(only 1 required, but fine)")
     return plan
 
 
