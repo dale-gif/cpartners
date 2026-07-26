@@ -66,16 +66,26 @@ def render_card(
             outline=WHITE,
         )
 
-    title_font = _load_font(font_dir, "Black", TITLE_SIZE)
     num_font = _load_font(font_dir, "Black", ITEM_NUM_SIZE)
     text_font = _load_font(font_dir, "Regular", ITEM_TEXT_SIZE)
 
-    y = MARGIN + 8
+    # Auto-shrink title until it fits within the card width
     caps_title = (title or "").upper().strip()
+    max_title_w = CARD_W - 2 * MARGIN
+    title_size = TITLE_SIZE
+    title_font = _load_font(font_dir, "Black", title_size)
+    while title_size > 20:
+        w = draw.textbbox((0, 0), caps_title, font=title_font)[2]
+        if w <= max_title_w:
+            break
+        title_size -= 2
+        title_font = _load_font(font_dir, "Black", title_size)
+
+    y = MARGIN + 8
     draw.text((MARGIN, y), caps_title, font=title_font, fill=WHITE)
 
     # Thin white rule under title
-    y += TITLE_SIZE + 20
+    y += title_size + 20
     draw.rectangle(
         [MARGIN, y, CARD_W - MARGIN, y + RULE_H],
         fill=WHITE,

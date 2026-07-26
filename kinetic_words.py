@@ -62,23 +62,38 @@ def render_overlay(
     font_dir: Path,
     out_path: Path,
 ) -> Path:
-    """Render one text-overlay PNG. Returns the PNG path."""
+    """Render one text-overlay PNG. Returns the PNG path.
+
+    Auto-shrinks the font so the longest line fits within the canvas width.
+    Keeps the "Rule of 3": always renders 3 lines (pads with blanks).
+    """
     img = Image.new("RGBA", (OVERLAY_W, OVERLAY_H), TRANSPARENT)
 
     if style == "black-gradient":
         _draw_black_gradient(img)
 
     draw = ImageDraw.Draw(img)
-    font = _load_font(font_dir, FONT_SIZE)
 
     # Normalize to exactly 3 lines
     padded = (list(lines) + ["", "", ""])[:3]
-    total_h = FONT_SIZE * 3 + LINE_GAP * 2
+
+    # Auto-shrink font so every line fits within the horizontal margin
+    max_width = OVERLAY_W - 2 * MARGIN
+    size = FONT_SIZE
+    font = _load_font(font_dir, size)
+    while size > 40:
+        widths = [draw.textbbox((0, 0), line, font=font)[2] for line in padded if line]
+        if not widths or max(widths) <= max_width:
+            break
+        size -= 4
+        font = _load_font(font_dir, size)
+
+    total_h = size * 3 + LINE_GAP * 2
     y = (OVERLAY_H - total_h) // 2
 
     for line in padded:
         draw.text((MARGIN, y), line, font=font, fill=WHITE)
-        y += FONT_SIZE + LINE_GAP
+        y += size + LINE_GAP
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
