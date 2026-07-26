@@ -26,11 +26,24 @@ BLACK_TRANSLUCENT = (0, 0, 0, 220)
 TRANSPARENT = (0, 0, 0, 0)
 
 
+_DEJAVU_FALLBACK = {
+    "Regular":   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "Black":     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "ExtraBold": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+}
+
+
 def _load_font(font_dir: Path, weight: str, size: int) -> ImageFont.FreeTypeFont:
     path = font_dir / f"Inter-{weight}.ttf"
-    if not path.exists():
-        return ImageFont.load_default()
-    return ImageFont.truetype(str(path), size)
+    if path.exists():
+        return ImageFont.truetype(str(path), size)
+    fallback = _DEJAVU_FALLBACK.get(weight)
+    if fallback and Path(fallback).exists():
+        print(f"[graphic_cards] WARNING: Inter-{weight} not at {path}, using DejaVu")
+        return ImageFont.truetype(fallback, size)
+    print(f"[graphic_cards] ERROR: no scalable font found for weight={weight}, "
+          f"tried {path} and {fallback}. Falling back to PIL default (tiny).")
+    return ImageFont.load_default()
 
 
 def render_card(

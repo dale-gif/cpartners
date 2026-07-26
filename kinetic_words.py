@@ -22,11 +22,18 @@ WHITE = (255, 255, 255, 255)
 TRANSPARENT = (0, 0, 0, 0)
 
 
+_DEJAVU_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
 def _load_font(font_dir: Path, size: int) -> ImageFont.FreeTypeFont:
     path = font_dir / "Inter-ExtraBold.ttf"
-    if not path.exists():
-        return ImageFont.load_default()
-    return ImageFont.truetype(str(path), size)
+    if path.exists():
+        return ImageFont.truetype(str(path), size)
+    if Path(_DEJAVU_BOLD).exists():
+        print(f"[kinetic_words] WARNING: Inter-ExtraBold not at {path}, using DejaVu")
+        return ImageFont.truetype(_DEJAVU_BOLD, size)
+    print(f"[kinetic_words] ERROR: no scalable font found (Inter or DejaVu)")
+    return ImageFont.load_default()
 
 
 def _draw_black_gradient(img: Image.Image) -> None:

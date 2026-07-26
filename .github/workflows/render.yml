@@ -37,9 +37,12 @@ jobs:
           curl -fsSL -o /tmp/inter.zip \
             "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip"
           unzip -q /tmp/inter.zip -d /tmp/inter
-          cp /tmp/inter/extras/ttf/Inter-Regular.ttf   fonts/
-          cp /tmp/inter/extras/ttf/Inter-Black.ttf     fonts/
-          cp /tmp/inter/extras/ttf/Inter-ExtraBold.ttf fonts/
+          # v4.0 puts TTFs in "Inter Desktop/" (with a space). Copy from wherever they are.
+          find /tmp/inter -type f -name 'Inter-Regular.ttf'   -exec cp {} fonts/ \;
+          find /tmp/inter -type f -name 'Inter-Black.ttf'     -exec cp {} fonts/ \;
+          find /tmp/inter -type f -name 'Inter-ExtraBold.ttf' -exec cp {} fonts/ \;
+          echo "---- fonts/ contents ----"
+          ls -la fonts/
 
       - name: Install Python deps
         run: |
@@ -57,7 +60,15 @@ jobs:
           FONT_DIR: fonts
         run: python render_job.py
 
-      - name: Publish MP4 as GitHub Release
+      - name: Bundle debug assets
+        if: always()
+        run: |
+          mkdir -p out
+          # copy every generated overlay PNG + the plan JSON into the release payload
+          cp work/*.png       out/ 2>/dev/null || true
+          cp work/plan.json   out/ 2>/dev/null || true
+
+      - name: Publish MP4 + debug assets as GitHub Release
         id: release
         uses: softprops/action-gh-release@v2
         with:
@@ -65,9 +76,12 @@ jobs:
           name: GODTIER ${{ github.event.client_payload.videoId || inputs.videoId }}
           body: |
             GODTIER-composited video for `${{ github.event.client_payload.videoId || inputs.videoId }}`.
-            Source OpusClip URL was signed and expires — file below is the finished MP4.
-          files: out/*.mp4
-          fail_on_unmatched_files: true
+            Attached: final MP4 + intermediate overlay PNGs + plan.json for inspection.
+          files: |
+            out/*.mp4
+            out/*.png
+            out/plan.json
+          fail_on_unmatched_files: false
 
       - name: Summary
         if: always()
