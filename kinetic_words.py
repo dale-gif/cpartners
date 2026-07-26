@@ -77,8 +77,14 @@ def render_overlay(
     # Normalize to exactly 3 lines
     padded = (list(lines) + ["", "", ""])[:3]
 
-    # Auto-shrink font so every line fits within the horizontal margin
-    max_width = OVERLAY_W - 2 * MARGIN
+    # Auto-shrink font so every line fits within the readable area.
+    # For 'black-gradient' the black fill only covers the left ~55% of the
+    # canvas (fades to transparent after), so text must fit inside that zone.
+    # For 'white' the whole canvas is a clean overlay so more width is usable.
+    if style == "black-gradient":
+        max_width = int(OVERLAY_W * 0.5) - MARGIN
+    else:
+        max_width = int(OVERLAY_W * 0.85) - MARGIN
     size = FONT_SIZE
     font = _load_font(font_dir, size)
     while size > 40:

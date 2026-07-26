@@ -95,16 +95,25 @@ def render_infographic(spec: dict[str, Any], font_dir: Path, out_path: Path) -> 
 # ---- Three-cards template (Larry-approved) --------------------------------
 
 def _render_three_cards(spec: dict[str, Any], font_dir: Path, out_path: Path) -> Path:
+    """Render 2 to 4 bordered cards side-by-side (Larry-approved layout).
+
+    Card count comes from spec.cards; clamped to [2, 4]. The horizontal layout
+    adapts so cards always fill the frame proportionally.
+    """
     overall_title = (spec.get("overall_title") or spec.get("title") or "").upper().strip()
     subtitle = (spec.get("subtitle") or "").upper().strip()
 
-    raw_cards = spec.get("cards") or []
+    raw_cards = list(spec.get("cards") or [])
     # Back-compat: if Claude still uses items[], synthesize cards from them.
     if not raw_cards and spec.get("items"):
-        raw_cards = [{"title": "", "description": str(x).upper()} for x in spec["items"][:3]]
+        raw_cards = [{"title": "", "description": str(x).upper()}
+                     for x in spec["items"][:4]]
 
-    # Always render exactly 3 cards (pad with blanks so layout stays balanced)
-    cards = (list(raw_cards) + [{}, {}, {}])[:3]
+    # Clamp to 2..4 cards, drop empties past that
+    cards = [c for c in raw_cards if c.get("title") or c.get("description")][:4]
+    if len(cards) < 2:
+        cards = (cards + [{}, {}])[:2]
+    n = len(cards)
 
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BLACK_OPAQUE)
     draw = ImageDraw.Draw(img)
@@ -124,15 +133,15 @@ def _render_three_cards(spec: dict[str, Any], font_dir: Path, out_path: Path) ->
     if subtitle:
         draw.text((header_x, header_y + 110), subtitle, font=sub_font, fill=GREY)
 
-    # ---- Cards row ----
+    # ---- Cards row (adapts to 2/3/4 cards) ----
     outer_pad = 100
-    gap = 60
+    gap = 60 if n <= 3 else 40
     row_top = 350
     row_bottom = CANVAS_H - 120
     card_h = row_bottom - row_top
-    card_w = (CANVAS_W - 2 * outer_pad - 2 * gap) // 3
+    card_w = (CANVAS_W - 2 * outer_pad - (n - 1) * gap) // n
 
-    for i in range(3):
+    for i in range(n):
         cx = outer_pad + i * (card_w + gap)
         _render_card_box(draw, cx, row_top, card_w, card_h, i, cards[i], font_dir)
 
