@@ -36,16 +36,18 @@ SAFE_Y = 40
 SAFE_W = 900
 SAFE_H = 760
 
-# Infographic PNGs are authored at 1920x1080; the composite scales them to
-# fit the safe zone (900 wide, aspect-preserved → ~506 tall) and positions
-# them in the vertical middle of the box.
-INFOGRAPHIC_TARGET_W = 900
-INFOGRAPHIC_TARGET_H = -2  # -2 lets ffmpeg pick aspect-preserving height (even)
-INFOGRAPHIC_SCALED_H = int(1080 * INFOGRAPHIC_TARGET_W / 1920)  # 506
-INFOGRAPHIC_X = SAFE_X
-INFOGRAPHIC_Y = SAFE_Y + (SAFE_H - INFOGRAPHIC_SCALED_H) // 2  # centered vertically in box
+# Infographics are FULL-FRAME cutaways (Larry-approved reference): they
+# cover Stacey entirely and fill the top of the frame, leaving only the
+# bottom caption band clear. Card PNGs are authored at 1920x1080 and scaled
+# to 1920x900 (slight vertical compression is acceptable and matches the
+# approved layout).
+INFOGRAPHIC_TARGET_W = 1920
+INFOGRAPHIC_TARGET_H = 900
+INFOGRAPHIC_X = 0
+INFOGRAPHIC_Y = 0
 
-# Overlay PNGs are already authored at 900x760 (exact safe zone), no scaling.
+# Text overlays land in the safe zone (frame-left, Stacey visible right).
+# PNGs are authored at 900x760 (exact safe zone), no scaling required.
 OVERLAY_X = SAFE_X
 OVERLAY_Y = SAFE_Y
 
