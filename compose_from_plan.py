@@ -26,24 +26,46 @@ TARGET_W = 1920
 TARGET_H = 1080
 SCALE = 1.0  # overlays and infographics are authored at 1920x1080 natively
 
-# Frame-left positioning against a 1920x1080 canvas
-INFOGRAPHIC_X = 0
-INFOGRAPHIC_Y = 0
-# Overlay lands near top-left so text stays clear of OpusClip's bottom caption
-# band. Combined with top-anchored text at canvas y=60 (see kinetic_words),
-# text renders at frame y ≈ 130-680, always above the caption zone.
-OVERLAY_X = 60
-OVERLAY_Y = 60
+# Frame-left "safe zone" (Larry-approved) — the red box in reference shots.
+# All overlays and infographics must sit entirely within this box in the
+# 1920x1080 output frame:
+#   x ∈ [40, 940]    (900 wide — leaves Stacey clear at frame-right)
+#   y ∈ [40, 800]    (760 tall — leaves OpusClip caption band clear)
+SAFE_X = 40
+SAFE_Y = 40
+SAFE_W = 900
+SAFE_H = 760
+
+# Infographic PNGs are authored at 1920x1080; the composite scales them to
+# fit the safe zone (900 wide, aspect-preserved → ~506 tall) and positions
+# them in the vertical middle of the box.
+INFOGRAPHIC_TARGET_W = 900
+INFOGRAPHIC_TARGET_H = -2  # -2 lets ffmpeg pick aspect-preserving height (even)
+INFOGRAPHIC_SCALED_H = int(1080 * INFOGRAPHIC_TARGET_W / 1920)  # 506
+INFOGRAPHIC_X = SAFE_X
+INFOGRAPHIC_Y = SAFE_Y + (SAFE_H - INFOGRAPHIC_SCALED_H) // 2  # centered vertically in box
+
+# Overlay PNGs are already authored at 900x760 (exact safe zone), no scaling.
+OVERLAY_X = SAFE_X
+OVERLAY_Y = SAFE_Y
 
 
 @dataclass
 class TimedAsset:
-    """One PNG scheduled onto the base video timeline."""
+    """One PNG scheduled onto the base video timeline.
+
+    target_w / target_h: if target_w > 0, ffmpeg scales the PNG to
+    (target_w x target_h) before compositing. Use target_h=-2 for aspect-
+    preserving height. If target_w == 0 the PNG is composited at its native
+    dimensions.
+    """
     png: Path
     start: float
     hold: float
     x: int
     y: int
+    target_w: int = 0
+    target_h: int = 0
 
 
 def _build_filter_complex(assets: list[TimedAsset]) -> str:
@@ -62,17 +84,21 @@ def _build_filter_complex(assets: list[TimedAsset]) -> str:
     for i, a in enumerate(assets, start=1):
         end = a.start + a.hold
         fade_out_start = max(a.start, end - FADE)
+        # Per-asset scaling: infographics scale down to fit the safe zone;
+        # overlays are already authored at the right size.
+        if a.target_w > 0:
+            scale_expr = f"scale={a.target_w}:{a.target_h}"
+        else:
+            scale_expr = f"scale=iw*{SCALE}:ih*{SCALE}"
         parts.append(
-            f"[{i}:v]scale=iw*{SCALE}:ih*{SCALE},format=yuva420p,"
+            f"[{i}:v]{scale_expr},format=yuva420p,"
             f"fade=t=in:st={a.start}:d={FADE}:alpha=1,"
             f"fade=t=out:st={fade_out_start}:d={FADE}:alpha=1"
             f"[a{i}];"
         )
         cur = f"[v{i}]"
-        x_scaled = int(a.x * SCALE)
-        y_scaled = int(a.y * SCALE)
         parts.append(
-            f"{prev}[a{i}]overlay=x={x_scaled}:y={y_scaled}:"
+            f"{prev}[a{i}]overlay=x={a.x}:y={a.y}:"
             f"enable='between(t,{a.start},{end})':"
             f"shortest=0{cur};"
         )

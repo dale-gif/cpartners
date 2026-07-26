@@ -22,6 +22,10 @@ import requests
 
 from compose_from_plan import (
     INFOGRAPHIC_HOLD,
+    INFOGRAPHIC_TARGET_H,
+    INFOGRAPHIC_TARGET_W,
+    INFOGRAPHIC_X,
+    INFOGRAPHIC_Y,
     OVERLAY_HOLD,
     OVERLAY_X,
     OVERLAY_Y,
@@ -230,16 +234,17 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
 
 def build_assets(plan: dict) -> list[TimedAsset]:
     assets: list[TimedAsset] = []
-    # Infographics: full-frame cutaway (1920x1080 canvas -> 1280x720 after SCALE)
+    # Infographics: authored at 1920x1080, scaled down to fit the safe zone.
     for i, card in enumerate(plan.get("infographics") or []):
         png = render_infographic(card, FONT_DIR, WORK / f"card_{i}.png")
         assets.append(TimedAsset(
             png=png,
             start=float(card.get("timestamp", 0)),
             hold=float(card.get("hold", INFOGRAPHIC_HOLD)),
-            x=0, y=0,
+            x=INFOGRAPHIC_X, y=INFOGRAPHIC_Y,
+            target_w=INFOGRAPHIC_TARGET_W, target_h=INFOGRAPHIC_TARGET_H,
         ))
-    # Text overlays: frame-left over Stacey
+    # Text overlays: authored natively at the safe zone size, no scaling.
     for i, ov in enumerate(plan.get("text_overlays") or []):
         png = render_overlay(
             lines=list(ov.get("lines") or []),

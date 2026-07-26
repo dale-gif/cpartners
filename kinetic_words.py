@@ -14,13 +14,14 @@ from __future__ import annotations
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# Overlay is authored at 1920x1080; compose scales it by 0.667 so it fills
-# the composited 1280x720 frame. Font sizes are source-space (post-scale in
-# the final MP4 they render at ~2/3 these values).
-OVERLAY_W, OVERLAY_H = 1920, 1080
-FONT_SIZE = 180  # ≈120px in final composited output (well above Larry's 104px spec)
-LINE_GAP = 40
-MARGIN = 120
+# Overlay canvas matches the frame-left "safe zone" red-box exactly (900x760).
+# Composited 1:1 into a 1920x1080 frame at position (OVERLAY_X, OVERLAY_Y),
+# it stays clear of Stacey (frame-right, from x≈940) and OpusClip's bottom
+# caption band (from y≈820).
+OVERLAY_W, OVERLAY_H = 900, 760
+FONT_SIZE = 140
+LINE_GAP = 25
+MARGIN = 30
 WHITE = (255, 255, 255, 255)
 TRANSPARENT = (0, 0, 0, 0)
 
@@ -103,8 +104,8 @@ def render_overlay(
 
     # Anchor text to TOP of canvas so it stays above OpusClip's caption band
     # once composited. The overlay is placed at (OVERLAY_X, OVERLAY_Y) in the
-    # frame; keeping text near y=60 in the canvas gives predictable framing.
-    y = 60
+    # frame; keeping text near y=40 in the canvas gives predictable framing.
+    y = 40
     for line in padded:
         draw.text((MARGIN, y), line, font=font, fill=WHITE)
         y += size + LINE_GAP
