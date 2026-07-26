@@ -14,10 +14,13 @@ from __future__ import annotations
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-OVERLAY_W, OVERLAY_H = 1080, 720
-FONT_SIZE = 104
-LINE_GAP = 24
-MARGIN = 72
+# Overlay is authored at 1920x1080; compose scales it by 0.667 so it fills
+# the composited 1280x720 frame. Font sizes are source-space (post-scale in
+# the final MP4 they render at ~2/3 these values).
+OVERLAY_W, OVERLAY_H = 1920, 1080
+FONT_SIZE = 180  # ≈120px in final composited output (well above Larry's 104px spec)
+LINE_GAP = 40
+MARGIN = 120
 WHITE = (255, 255, 255, 255)
 TRANSPARENT = (0, 0, 0, 0)
 
