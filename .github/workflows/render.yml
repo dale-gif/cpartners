@@ -1,0 +1,66 @@
+name: GODTIER Render
+
+on:
+  repository_dispatch:
+    types: [crp-render]
+  workflow_dispatch:
+    inputs:
+      opusClipUrl:
+        description: 'OpusClip signed MP4 URL'
+        required: true
+      videoId:
+        description: 'Video / asset id (used in output filename)'
+        required: true
+        default: manual-test
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Inter font
+        run: |
+          mkdir -p fonts
+          curl -fsSL -o /tmp/inter.zip \
+            "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip"
+          unzip -q /tmp/inter.zip -d /tmp/inter
+          cp /tmp/inter/extras/ttf/Inter-Regular.ttf   fonts/
+          cp /tmp/inter/extras/ttf/Inter-Black.ttf     fonts/
+          cp /tmp/inter/extras/ttf/Inter-ExtraBold.ttf fonts/
+
+      - name: Install Python deps
+        run: |
+          pip install --no-cache-dir \
+            pillow==10.4.0 \
+            requests==2.32.3 \
+            google-api-python-client==2.150.0 \
+            google-auth==2.36.0
+
+      - name: Render
+        id: render
+        env:
+          OPUS_CLIP_URL: ${{ github.event.client_payload.opusClipUrl || inputs.opusClipUrl }}
+          VIDEO_ID:      ${{ github.event.client_payload.videoId    || inputs.videoId    }}
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_DRIVE_CREDENTIALS:  ${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}
+          OUTPUT_FOLDER_ID:          ${{ secrets.OUTPUT_FOLDER_ID }}
+          FONT_DIR: fonts
+        run: python render_job.py
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## GODTIER Render — ${{ github.event.client_payload.videoId || inputs.videoId }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Drive file id: ${{ steps.render.outputs.drive_file_id || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Drive link: ${{ steps.render.outputs.drive_link || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
