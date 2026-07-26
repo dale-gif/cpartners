@@ -41,7 +41,7 @@ FONT_DIR = Path(os.environ.get("FONT_DIR", "fonts"))
 WORK = Path("work")
 
 CLAUDE_SYSTEM = (
-    "You are the GODTIER graphic planner for CRP long-form videos. "
+    "You are the GODTIER graphic planner for CRP videos. "
     "You read a Whisper verbose_json transcript and emit a JSON plan that "
     "chooses infographic moments and text overlay moments. "
     "STRICT DESIGN RULES: pure black and white only; bordered cards only; "
@@ -51,15 +51,25 @@ CLAUDE_SYSTEM = (
     "large margined type. TEXT OVERLAYS: exactly 3 lines per overlay; plain text; "
     "Inter 800; 104px at 1920 wide; sync to speech; style is either 'white' "
     "(white text over Stacey) or 'black-gradient' (white text on black gradient "
-    "blended into her). OUTPUT COUNTS: exactly 3 infographic moments and exactly "
-    "3 text overlay moments across the LF. FRAME: Stacey is frame-right; "
-    "graphics/text land frame-left; keep clear of the bottom caption band. "
+    "blended into her). FRAME: Stacey is frame-right; graphics/text land "
+    "frame-left; keep clear of the bottom caption band. "
     "Return ONLY a single JSON object matching this schema and nothing else: "
     "{\"infographics\":[{\"timestamp\":<seconds>,\"template\":\"bordered-list\","
     "\"title\":\"CAPS TITLE\",\"items\":[\"ITEM 1\",\"ITEM 2\",\"ITEM 3\"]}],"
     "\"text_overlays\":[{\"timestamp\":<seconds>,\"lines\":[\"line one\","
     "\"line two\",\"line three\"],\"style\":\"white|black-gradient\"}]}"
 )
+
+# Duration thresholds for auto-format detection (seconds).
+# CRP formats: MF = medium form (3-6 min), LF = long form (6-12 min).
+LF_MIN_SECONDS = 360.0  # 6 min
+
+
+def detect_format(duration: float) -> tuple[str, int, int]:
+    """Return (format_label, infographic_count, text_overlay_count)."""
+    if duration < LF_MIN_SECONDS:
+        return "MF", 2, 2
+    return "LF", 3, 3
 
 
 def log(msg: str) -> None:
@@ -119,14 +129,18 @@ def whisper_transcribe(audio: Path) -> dict:
     return r.json()
 
 
-def claude_plan(transcript: dict, duration: float) -> dict:
+def claude_plan(transcript: dict, duration: float, fmt: str,
+                infographic_count: int, overlay_count: int) -> dict:
     user_msg = (
         f"Here is the Whisper verbose_json for this video.\n\n"
+        f"VIDEO_FORMAT: {fmt}\n"
         f"VIDEO_DURATION_SECONDS: {duration:.1f}\n\n"
+        f"OUTPUT COUNTS FOR THIS {fmt}: exactly {infographic_count} infographic "
+        f"moments and exactly {overlay_count} text overlay moments.\n\n"
         f"HARD CONSTRAINT: every timestamp you emit MUST be a number between "
-        f"0 and {duration:.1f}. Distribute the 3 infographics and 3 text "
-        f"overlays evenly across that range. Do not use timestamps past "
-        f"{duration:.1f}s — the video ends there.\n\n"
+        f"0 and {duration:.1f}. Distribute the {infographic_count} infographics "
+        f"and {overlay_count} text overlays evenly across that range. Do not "
+        f"use timestamps past {duration:.1f}s — the video ends there.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
     )
     r = requests.post(
@@ -214,14 +228,16 @@ def main() -> None:
     extract_audio(video, audio)
 
     duration = video_duration(video)
-    log(f"video duration: {duration:.1f}s")
+    fmt, card_count, overlay_count = detect_format(duration)
+    log(f"video duration: {duration:.1f}s → format={fmt} "
+        f"({card_count} cards + {overlay_count} overlays)")
 
     log("[3/5] whisper transcription")
     transcript = whisper_transcribe(audio)
     (WORK / "whisper.json").write_text(json.dumps(transcript))
 
     log("[4/5] claude planner")
-    plan = claude_plan(transcript, duration)
+    plan = claude_plan(transcript, duration, fmt, card_count, overlay_count)
     (WORK / "plan.json").write_text(json.dumps(plan, indent=2))
     log(f"plan: {len(plan.get('infographics') or [])} cards, "
         f"{len(plan.get('text_overlays') or [])} overlays")
