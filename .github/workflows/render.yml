@@ -13,6 +13,9 @@ on:
         required: true
         default: manual-test
 
+permissions:
+  contents: write   # required for softprops/action-gh-release
+
 jobs:
   render:
     runs-on: ubuntu-latest
@@ -42,25 +45,33 @@ jobs:
         run: |
           pip install --no-cache-dir \
             pillow==10.4.0 \
-            requests==2.32.3 \
-            google-api-python-client==2.150.0 \
-            google-auth==2.36.0
+            requests==2.32.3
 
       - name: Render
         id: render
         env:
           OPUS_CLIP_URL: ${{ github.event.client_payload.opusClipUrl || inputs.opusClipUrl }}
           VIDEO_ID:      ${{ github.event.client_payload.videoId    || inputs.videoId    }}
-          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_DRIVE_CREDENTIALS:  ${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}
-          OUTPUT_FOLDER_ID:          ${{ secrets.OUTPUT_FOLDER_ID }}
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FONT_DIR: fonts
         run: python render_job.py
+
+      - name: Publish MP4 as GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: godtier-${{ github.run_id }}
+          name: GODTIER ${{ github.event.client_payload.videoId || inputs.videoId }}
+          body: |
+            GODTIER-composited video for `${{ github.event.client_payload.videoId || inputs.videoId }}`.
+            Source OpusClip URL was signed and expires — file below is the finished MP4.
+          files: out/*.mp4
+          fail_on_unmatched_files: true
 
       - name: Summary
         if: always()
         run: |
           echo "## GODTIER Render — ${{ github.event.client_payload.videoId || inputs.videoId }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Drive file id: ${{ steps.render.outputs.drive_file_id || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Drive link: ${{ steps.render.outputs.drive_link || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Filename: ${{ steps.render.outputs.filename || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Release: ${{ steps.release.outputs.url || 'n/a' }}" >> $GITHUB_STEP_SUMMARY

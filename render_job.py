@@ -32,7 +32,6 @@ from compose_from_plan import (
 )
 from graphic_cards import render_card
 from kinetic_words import render_overlay
-from drive_utils import upload_to_drive
 
 OPUS_URL = os.environ["OPUS_CLIP_URL"]
 VIDEO_ID = os.environ["VIDEO_ID"]
@@ -202,16 +201,17 @@ def main() -> None:
     composite(video, assets, final)
     log(f"final → {final} ({final.stat().st_size / 1024 / 1024:.1f} MB)")
 
-    log("upload to drive")
+    # Rename to the target filename and put it at a stable location the
+    # workflow YAML picks up for the Release upload step.
     filename = f"{VIDEO_ID}_GODTIER.mp4"
-    file_info = upload_to_drive(final, filename)
-    log(f"uploaded: id={file_info['id']} link={file_info.get('webViewLink')}")
+    out = Path("out") / filename
+    out.parent.mkdir(exist_ok=True)
+    final.rename(out)
+    log(f"ready for release upload: {out}")
 
-    # GitHub Actions surface — write outputs so downstream steps / logs can see
     with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
-        f.write(f"drive_file_id={file_info['id']}\n")
-        f.write(f"drive_link={file_info.get('webViewLink', '')}\n")
         f.write(f"filename={filename}\n")
+        f.write(f"output_path={out}\n")
 
 
 if __name__ == "__main__":
