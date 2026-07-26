@@ -22,15 +22,13 @@ import requests
 
 from compose_from_plan import (
     INFOGRAPHIC_HOLD,
-    INFOGRAPHIC_X,
-    INFOGRAPHIC_Y,
     OVERLAY_HOLD,
     OVERLAY_X,
     OVERLAY_Y,
     TimedAsset,
     composite,
 )
-from graphic_cards import render_card
+from graphic_cards import render_infographic
 from kinetic_words import render_overlay
 
 OPUS_URL = os.environ["OPUS_CLIP_URL"]
@@ -41,27 +39,40 @@ FONT_DIR = Path(os.environ.get("FONT_DIR", "fonts"))
 WORK = Path("work")
 
 CLAUDE_SYSTEM = (
-    "You are the GODTIER graphic planner for CRP videos. "
-    "You read a Whisper verbose_json transcript and emit a JSON plan that "
-    "chooses infographic moments and text overlay moments. "
-    "STRICT DESIGN RULES: pure black and white only; bordered cards only; "
-    "CAPS titles; exactly 3 items per infographic card unless Stacey names a "
-    "different count (match her spoken count exactly); hold cards 6-10 seconds; "
-    "appear (fade/scale), never slide; no kickers, page counters, or type labels; "
-    "large margined type. TEXT OVERLAYS: exactly 3 lines per overlay; plain text; "
-    "Inter 800; 104px at 1920 wide; sync to speech; style is either 'white' "
-    "(white text over Stacey) or 'black-gradient' (white text on black gradient "
-    "blended into her). FRAME: Stacey is frame-right; graphics/text land "
-    "frame-left; keep clear of the bottom caption band. "
-    "LENGTH LIMITS (hard): infographic title <= 22 characters (fits on one line at "
-    "big type); infographic item <= 24 characters; text overlay line <= 18 "
-    "characters (fits big and readable). If you can't fit the idea, break it "
-    "into fewer words or use a punchier phrasing. "
-    "Return ONLY a single JSON object matching this schema and nothing else: "
-    "{\"infographics\":[{\"timestamp\":<seconds>,\"template\":\"bordered-list\","
-    "\"title\":\"CAPS TITLE\",\"items\":[\"ITEM 1\",\"ITEM 2\",\"ITEM 3\"]}],"
-    "\"text_overlays\":[{\"timestamp\":<seconds>,\"lines\":[\"line one\","
-    "\"line two\",\"line three\"],\"style\":\"white|black-gradient\"}]}"
+    "You are the GODTIER graphic planner for CRP videos. You read a Whisper "
+    "verbose_json transcript and emit a JSON plan that chooses infographic "
+    "moments and text overlay moments.\n\n"
+    "GLOBAL STYLE (locked by Larry): pure black and white only; bordered "
+    "cards only; every single character ALL CAPS; punchy phrasing; hold cards "
+    "6-10 seconds; appear (fade/scale), never slide; no kickers, page counters, "
+    "type labels, or emoji.\n\n"
+    "INFOGRAPHIC = THREE-CARDS TEMPLATE (Larry-approved reference): each "
+    "infographic moment is one THREE-CARDS graphic containing:\n"
+    "  * overall_title:  1-3 word CAPS phrase, <= 22 chars.  Example: WHY THEY DON'T PAY\n"
+    "  * subtitle:       one short CAPS phrase, <= 40 chars.  Example: IT IS A CHOICE, NOT AN ACCIDENT\n"
+    "  * cards[3]:       exactly 3 cards. Each card:\n"
+    "      - title:       1-2 words, CAPS, <= 12 chars.  Example: CASH FLOW\n"
+    "      - description: 2-3 short phrases, CAPS, <= 60 chars total. "
+    "                     Example: THEY USE YOUR MONEY TO MANAGE THEIRS\n"
+    "Use template = \"three-cards\" for every infographic. NO fancy adjectives, "
+    "NO buzzwords, NO explainers longer than a breath.\n\n"
+    "TEXT OVERLAYS: exactly 3 lines per overlay; plain text; punchy; each line "
+    "<= 18 characters. Style is 'white' (white text over Stacey) or "
+    "'black-gradient' (white text on black gradient blended into her).\n\n"
+    "FRAME: infographic three-cards graphic fills the frame (cutaway from "
+    "Stacey). Text overlays land frame-left with Stacey visible frame-right.\n\n"
+    "Return ONLY a single JSON object matching this schema and nothing else:\n"
+    "{\"infographics\":["
+    "{\"timestamp\":<seconds>,\"template\":\"three-cards\","
+    "\"overall_title\":\"CAPS TITLE\",\"subtitle\":\"CAPS SUBTITLE\","
+    "\"cards\":[{\"title\":\"CAPS\",\"description\":\"CAPS DESC\"},"
+    "{\"title\":\"CAPS\",\"description\":\"CAPS DESC\"},"
+    "{\"title\":\"CAPS\",\"description\":\"CAPS DESC\"}]}"
+    "],"
+    "\"text_overlays\":["
+    "{\"timestamp\":<seconds>,\"lines\":[\"LINE ONE\",\"LINE TWO\",\"LINE THREE\"],"
+    "\"style\":\"white|black-gradient\"}"
+    "]}"
 )
 
 # Duration thresholds for auto-format detection (seconds).
@@ -189,19 +200,16 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
 
 def build_assets(plan: dict) -> list[TimedAsset]:
     assets: list[TimedAsset] = []
+    # Infographics: full-frame cutaway (1920x1080 canvas -> 1280x720 after SCALE)
     for i, card in enumerate(plan.get("infographics") or []):
-        png = render_card(
-            title=card.get("title") or "",
-            items=list(card.get("items") or [])[:5],
-            font_dir=FONT_DIR,
-            out_path=WORK / f"card_{i}.png",
-        )
+        png = render_infographic(card, FONT_DIR, WORK / f"card_{i}.png")
         assets.append(TimedAsset(
             png=png,
             start=float(card.get("timestamp", 0)),
             hold=float(card.get("hold", INFOGRAPHIC_HOLD)),
-            x=INFOGRAPHIC_X, y=INFOGRAPHIC_Y,
+            x=0, y=0,
         ))
+    # Text overlays: frame-left over Stacey
     for i, ov in enumerate(plan.get("text_overlays") or []):
         png = render_overlay(
             lines=list(ov.get("lines") or []),
@@ -246,8 +254,10 @@ def main() -> None:
     log(f"plan: {len(plan.get('infographics') or [])} cards, "
         f"{len(plan.get('text_overlays') or [])} overlays")
     for i, c in enumerate(plan.get("infographics") or []):
-        log(f"  card {i}: t={c.get('timestamp')}s title={c.get('title')!r} "
-            f"items={c.get('items')}")
+        titles = [x.get("title") for x in (c.get("cards") or [])]
+        log(f"  infographic {i}: t={c.get('timestamp')}s "
+            f"overall_title={c.get('overall_title') or c.get('title')!r} "
+            f"card_titles={titles}")
     for i, ov in enumerate(plan.get("text_overlays") or []):
         log(f"  overlay {i}: t={ov.get('timestamp')}s style={ov.get('style')!r} "
             f"lines={ov.get('lines')}")
