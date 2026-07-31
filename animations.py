@@ -177,84 +177,329 @@ def render_title_frames(text, font_dir, out_dir, entrance_secs):
 
 
 # ----------------------------------------------------------------------------
-# INFOGRAPHIC — staggered card reveal (three-cards layout; default)
+# INFOGRAPHIC — 7 templates, each a staggered reveal on black.
+#   header blur-in -> subtitle fade -> 3 items revealed in sequence.
+# All templates share timing: item i enters at IG_ITEM0 + i*IG_STAGGER.
 # ----------------------------------------------------------------------------
 IG_HX, IG_HY = 90, 96
-IG_CARD_W, IG_CARD_H, IG_GAP, IG_CARDS_Y, IG_STROKE = 480, 520, 60, 360, 3
-IG_HEADER_AT, IG_SUB_AT, IG_CARD0_AT, IG_CARD_STAGGER = 0.10, 0.34, 0.68, 0.55
+IG_HEADER_AT, IG_SUB_AT, IG_ITEM0, IG_STAGGER = 0.10, 0.34, 0.68, 0.55
 
 
-def render_infographic_frames(header, subtitle, cards, font_dir, out_dir, entrance_secs):
+def _lerp_alpha(t, start, dur=ENTRANCE):
+    age = t - start
+    if age < 0:
+        return 0.0
+    return _ease(min(age / dur, 1.0))
+
+
+def _fade_layer(img, draw_fn, alpha):
+    if alpha <= 0:
+        return img
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw_fn(ImageDraw.Draw(lay), int(255 * min(alpha, 1.0)))
+    return Image.alpha_composite(img, lay)
+
+
+def _wrap(draw, text, font, max_w):
+    words, lines, cur = (text or "").split(), [], []
+    for w in words:
+        if draw.textbbox((0, 0), " ".join(cur + [w]), font=font)[2] > max_w and cur:
+            lines.append(" ".join(cur)); cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        lines.append(" ".join(cur))
+    return lines
+
+
+def _desc_block(img, x, y, text, font, t, start, max_w, center=False, line_h=34):
+    a = _lerp_alpha(t, start)
+    if a <= 0:
+        return img
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    for ln in _wrap(d, text, font, max_w):
+        lx = x - d.textbbox((0, 0), ln, font=font)[2] // 2 if center else x
+        d.text((lx, y), ln, font=font, fill=(*GREY, int(255 * a)))
+        y += line_h
+    return Image.alpha_composite(img, lay)
+
+
+def _header(img, header, subtitle, fonts, t):
+    img = _blur_in_text(img, (IG_HX, IG_HY), header.upper(), fonts["h"], t, IG_HEADER_AT)
+    a = _lerp_alpha(t, IG_SUB_AT)
+    if a > 0:
+        img = _fade_layer(img, lambda d, al: d.text(
+            (IG_HX, IG_HY + 78), subtitle, font=fonts["sub"], fill=(*GREY, al)), a)
+    return img
+
+
+def _num(i):
+    return f"0{i+1}"
+
+
+# --- template: three-cards ---------------------------------------------------
+def _tpl_three_cards(img, t, cards, fonts):
+    CW, CH, GAP, CY = 480, 520, 60, 360
+    x0 = (W - (3 * CW + 2 * GAP)) // 2
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        cx = x0 + i * (CW + GAP)
+        be = _lerp_alpha(t, s)
+        if be <= 0:
+            continue
+        sc = 0.96 + 0.04 * be
+        cw, ch = int(CW * sc), int(CH * sc)
+        ox, oy = cx + (CW - cw) // 2, CY + (CH - ch) // 2
+        img = _fade_layer(img, lambda d, al, b=[ox, oy, cw, ch]: d.rounded_rectangle(
+            [b[0], b[1], b[0] + b[2], b[1] + b[3]], radius=8, outline=(255, 255, 255, al), width=3), be)
+        img = _blur_in_text(img, (cx + 40, CY + 44), _num(i), fonts["num"], t, s + 0.10)
+        ue = _lerp_alpha(t, s + 0.20, 0.3)
+        if ue > 0:
+            img = _fade_layer(img, lambda d, al, xx=cx, w=int(60 * ue): d.rectangle(
+                [xx + 42, CY + 150, xx + 42 + w, CY + 156], fill=(255, 255, 255, 255)), 1.0)
+        img = _blur_in_text(img, (cx + 40, CY + 200), (card.get("title") or "").upper(),
+                            fonts["title"], t, s + 0.26)
+        img = _desc_block(img, cx + 40, CY + 290, card.get("description"), fonts["desc"],
+                          t, s + 0.40, CW - 90)
+    return img
+
+
+# --- template: three-columns -------------------------------------------------
+def _tpl_three_columns(img, t, cards, fonts):
+    COLW, GAP, CY = 360, 90, 300
+    x0 = (W - (3 * COLW + 2 * GAP)) // 2
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        cx = x0 + i * (COLW + GAP)
+        mid = cx + COLW // 2
+        # vertical divider between columns
+        if i > 0:
+            dx = cx - GAP // 2
+            he = _lerp_alpha(t, s, 0.3)
+            img = _fade_layer(img, lambda d, al, x=dx, h=int(300 * he): d.line(
+                [(x, CY - 40), (x, CY - 40 + h)], fill=(120, 120, 120, 255), width=2), 1.0)
+        # icon circle placeholder
+        img = _fade_layer(img, lambda d, al, m=mid: d.ellipse(
+            [m - 44, CY - 20, m + 44, CY + 68], outline=(255, 255, 255, al), width=3), a)
+        img = _blur_in_text(img, (mid - fonts["ic"].getbbox("ICON")[2] // 2, CY + 8),
+                            "ICON", fonts["ic"], t, s + 0.06, fill=GREY)
+        # number centered
+        nb = fonts["num"].getbbox(_num(i))
+        img = _blur_in_text(img, (mid - nb[2] // 2, CY + 90), _num(i), fonts["num"], t, s + 0.12)
+        ue = _lerp_alpha(t, s + 0.22, 0.3)
+        if ue > 0:
+            img = _fade_layer(img, lambda d, al, m=mid, w=int(50 * ue): d.line(
+                [(m - w // 2, CY + 205), (m + w // 2, CY + 205)], fill=(255, 255, 255, 255), width=4), 1.0)
+        title = (card.get("title") or "").upper()
+        tb = fonts["title"].getbbox(title)
+        img = _blur_in_text(img, (mid - tb[2] // 2, CY + 225), title, fonts["title"], t, s + 0.28)
+        img = _desc_block(img, mid, CY + 300, card.get("description"), fonts["desc"],
+                          t, s + 0.42, COLW - 40, center=True)
+    return img
+
+
+# --- template: timeline ------------------------------------------------------
+def _tpl_timeline(img, t, cards, fonts):
+    CY, R = 300, 60
+    xs = [W // 2 - 500, W // 2, W // 2 + 500]
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        cx = xs[i]
+        # connecting line from previous circle
+        if i > 0:
+            le = _lerp_alpha(t, s, 0.3)
+            x1, x2 = xs[i - 1] + R, cx - R
+            img = _fade_layer(img, lambda d, al, a1=x1, a2=x1 + int((x2 - x1) * le): d.line(
+                [(a1, CY), (a2, CY)], fill=(255, 255, 255, 255), width=3), 1.0)
+        img = _fade_layer(img, lambda d, al, x=cx: d.ellipse(
+            [x - R, CY - R, x + R, CY + R], outline=(255, 255, 255, al), width=3), a)
+        nb = fonts["num_s"].getbbox(_num(i))
+        img = _blur_in_text(img, (cx - nb[2] // 2, CY - 34), _num(i), fonts["num_s"], t, s + 0.10)
+        title = (card.get("title") or "").upper()
+        tb = fonts["title"].getbbox(title)
+        img = _blur_in_text(img, (cx - tb[2] // 2, CY + R + 40), title, fonts["title"], t, s + 0.24)
+        img = _desc_block(img, cx, CY + R + 120, card.get("description"), fonts["desc"],
+                          t, s + 0.40, 340, center=True)
+    return img
+
+
+# --- template: numbered-list -------------------------------------------------
+def _tpl_numbered_list(img, t, cards, fonts):
+    x0, y0, rowh = 120, 320, 200
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        ry = y0 + i * rowh
+        img = _blur_in_text(img, (x0, ry), _num(i), fonts["num"], t, s + 0.08)
+        # vertical divider bar
+        img = _fade_layer(img, lambda d, al, y=ry: d.line(
+            [(x0 + 150, y + 10), (x0 + 150, y + 90)], fill=(255, 255, 255, al), width=3), a)
+        img = _blur_in_text(img, (x0 + 185, ry + 6), (card.get("title") or "").upper(),
+                            fonts["title"], t, s + 0.20)
+        img = _desc_block(img, x0 + 185, ry + 62, card.get("description"), fonts["desc"],
+                          t, s + 0.34, 1400)
+        # horizontal separator under row
+        se = _lerp_alpha(t, s + 0.30, 0.4)
+        if se > 0:
+            img = _fade_layer(img, lambda d, al, y=ry + 150, w=int((W - 2 * x0) * se): d.line(
+                [(x0, y), (x0 + w, y)], fill=(90, 90, 90, 255), width=2), 1.0)
+    return img
+
+
+# --- template: circle-diagram ------------------------------------------------
+def _tpl_circle_diagram(img, t, cards, fonts):
+    import math
+    cxr, cyr, R = 560, 560, 210
+    # ring appears, then 3 segment spokes, then legend
+    ring_a = _lerp_alpha(t, IG_ITEM0)
+    if ring_a > 0:
+        img = _fade_layer(img, lambda d, al: d.ellipse(
+            [cxr - R, cyr - R, cxr + R, cyr + R], outline=(255, 255, 255, al), width=3), ring_a)
+        img = _fade_layer(img, lambda d, al: d.ellipse(
+            [cxr - 46, cyr - 46, cxr + 46, cyr + 46], outline=(255, 255, 255, al), width=3), ring_a)
+    seg_angles = [-90, 30, 150]
+    lx = 1180
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        # spoke from center circle to ring
+        ang = math.radians(seg_angles[i])
+        x1, y1 = cxr + 46 * math.cos(ang), cyr + 46 * math.sin(ang)
+        x2, y2 = cxr + R * math.cos(ang), cyr + R * math.sin(ang)
+        img = _fade_layer(img, lambda d, al, p=(x1, y1, x2, y2): d.line(
+            [(p[0], p[1]), (p[2], p[3])], fill=(255, 255, 255, al), width=3), a)
+        # number inside segment
+        la = math.radians(seg_angles[i] + 60)
+        nx, ny = cxr + (R * 0.62) * math.cos(la), cyr + (R * 0.62) * math.sin(la)
+        nb = fonts["num_s"].getbbox(_num(i))
+        img = _blur_in_text(img, (nx - nb[2] // 2, ny - 30), _num(i), fonts["num_s"], t, s + 0.10)
+        # legend row on right
+        ly = 470 + i * 150
+        img = _blur_in_text(img, (lx, ly), _num(i), fonts["num"], t, s + 0.14)
+        img = _fade_layer(img, lambda d, al, y=ly: d.line(
+            [(lx + 140, y + 8), (lx + 140, y + 78)], fill=(255, 255, 255, al), width=3), a)
+        img = _blur_in_text(img, (lx + 170, ly + 4), (card.get("title") or "").upper(),
+                            fonts["title_s"], t, s + 0.24)
+        img = _desc_block(img, lx + 170, ly + 52, card.get("description"), fonts["desc"],
+                          t, s + 0.38, 560)
+        se = _lerp_alpha(t, s + 0.32, 0.4)
+        if se > 0:
+            img = _fade_layer(img, lambda d, al, y=ly + 120, w=int(600 * se): d.line(
+                [(lx, y), (lx + w, y)], fill=(90, 90, 90, 255), width=2), 1.0)
+    return img
+
+
+# --- template: problem-solution ----------------------------------------------
+def _tpl_problem_solution(img, t, cards, fonts):
+    import math
+    BOXW, BOXH, GAP, BY = 340, 300, 100, 300
+    x0 = (W - (3 * BOXW + 2 * GAP)) // 2
+    labels = ["PROBLEM", "CAUSE", "SOLUTION"]
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        bx = x0 + i * (BOXW + GAP)
+        cx, cy = bx + BOXW // 2, BY + BOXH // 2
+        img = _fade_layer(img, lambda d, al, b=bx: d.rectangle(
+            [b, BY, b + BOXW, BY + BOXH], outline=(255, 255, 255, al), width=3), a)
+        # simple icon per box
+        ia = _lerp_alpha(t, s + 0.10)
+        def _icon(d, al, idx=i, ccx=cx, ccy=cy):
+            col = (255, 255, 255, al)
+            if idx == 0:  # warning triangle
+                d.polygon([(ccx, ccy - 45), (ccx - 50, ccy + 40), (ccx + 50, ccy + 40)], outline=col, width=3)
+                d.line([(ccx, ccy - 12), (ccx, ccy + 18)], fill=col, width=3)
+                d.ellipse([ccx - 3, ccy + 26, ccx + 3, ccy + 32], fill=col)
+            elif idx == 1:  # magnifier
+                d.ellipse([ccx - 40, ccy - 40, ccx + 10, ccy + 10], outline=col, width=3)
+                d.line([(ccx + 8, ccy + 8), (ccx + 40, ccy + 40)], fill=col, width=4)
+            else:  # badge check
+                d.ellipse([ccx - 42, ccy - 42, ccx + 42, ccy + 42], outline=col, width=3)
+                d.line([(ccx - 18, ccy), (ccx - 4, ccy + 16)], fill=col, width=4)
+                d.line([(ccx - 4, ccy + 16), (ccx + 22, ccy - 16)], fill=col, width=4)
+        if ia > 0:
+            img = _fade_layer(img, _icon, ia)
+        lb = fonts["title"].getbbox(labels[i])
+        img = _blur_in_text(img, (cx - lb[2] // 2, BY + BOXH + 30), labels[i], fonts["title"], t, s + 0.24)
+        img = _desc_block(img, cx, BY + BOXH + 100, card.get("description"), fonts["desc"],
+                          t, s + 0.40, BOXW, center=True)
+    return img
+
+
+# --- template: checklist -----------------------------------------------------
+def _tpl_checklist(img, t, cards, fonts):
+    x0, y0, rowh, box = 120, 300, 210, 110
+    for i, card in enumerate(cards):
+        s = IG_ITEM0 + i * IG_STAGGER
+        a = _lerp_alpha(t, s)
+        if a <= 0:
+            continue
+        ry = y0 + i * rowh
+        img = _fade_layer(img, lambda d, al, y=ry: d.rectangle(
+            [x0, y, x0 + box, y + box], outline=(255, 255, 255, al), width=3), a)
+        pe = _lerp_alpha(t, s + 0.10)
+        if pe > 0:
+            cx, cy = x0 + box // 2, ry + box // 2
+            img = _fade_layer(img, lambda d, al, X=cx, Y=cy: (
+                d.line([(X - 28, Y), (X + 28, Y)], fill=(255, 255, 255, al), width=5),
+                d.line([(X, Y - 28), (X, Y + 28)], fill=(255, 255, 255, al), width=5)), pe)
+        img = _blur_in_text(img, (x0 + box + 40, ry + 2), (card.get("title") or "").upper(),
+                            fonts["big"], t, s + 0.22)
+        img = _desc_block(img, x0 + box + 40, ry + 74, card.get("description"), fonts["desc"],
+                          t, s + 0.36, 1500)
+        se = _lerp_alpha(t, s + 0.30, 0.4)
+        if se > 0:
+            img = _fade_layer(img, lambda d, al, y=ry + box + 30, w=int((W - 2 * x0) * se): d.line(
+                [(x0, y), (x0 + w, y)], fill=(90, 90, 90, 255), width=2), 1.0)
+    return img
+
+
+_TEMPLATES = {
+    "three-cards": _tpl_three_cards,
+    "three-columns": _tpl_three_columns,
+    "timeline": _tpl_timeline,
+    "numbered-list": _tpl_numbered_list,
+    "circle-diagram": _tpl_circle_diagram,
+    "problem-solution": _tpl_problem_solution,
+    "checklist": _tpl_checklist,
+}
+
+
+def render_infographic_frames(header, subtitle, cards, font_dir, out_dir,
+                              entrance_secs, template="three-cards"):
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     fonts = {
         "h": _font(font_dir, "Inter-ExtraBold.ttf", 52),
         "sub": _font(font_dir, "Inter-Regular.ttf", 26),
         "num": _font(font_dir, "Inter-Black.ttf", 92),
+        "num_s": _font(font_dir, "Inter-Black.ttf", 56),
         "title": _font(font_dir, "Inter-ExtraBold.ttf", 42),
+        "title_s": _font(font_dir, "Inter-ExtraBold.ttf", 36),
+        "big": _font(font_dir, "Inter-Black.ttf", 60),
+        "ic": _font(font_dir, "Inter-Regular.ttf", 24),
         "desc": _font(font_dir, "Inter-Regular.ttf", 25),
     }
     cards = (list(cards) + [{"title": "", "description": ""}] * 3)[:3]
+    draw_tpl = _TEMPLATES.get(template, _tpl_three_cards)
     n = int(entrance_secs * FPS)
-    total_w = 3 * IG_CARD_W + 2 * IG_GAP
-    x0 = (W - total_w) // 2
     for f in range(n):
         t = f / FPS
         img = Image.new("RGBA", (W, H), BLACK)
-        img = _blur_in_text(img, (IG_HX, IG_HY), header.upper(), fonts["h"], t, IG_HEADER_AT)
-        sage = t - IG_SUB_AT
-        if sage >= 0:
-            se = _ease(min(sage / ENTRANCE, 1.0))
-            lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            ImageDraw.Draw(lay).text((IG_HX, IG_HY + 78), subtitle, font=fonts["sub"],
-                                     fill=(*GREY, int(255 * se)))
-            img = Image.alpha_composite(img, lay)
-        for i, card in enumerate(cards):
-            cstart = IG_CARD0_AT + i * IG_CARD_STAGGER
-            cx = x0 + i * (IG_CARD_W + IG_GAP)
-            bage = t - cstart
-            if bage < 0:
-                continue
-            be = _ease(min(bage / ENTRANCE, 1.0))
-            scale = 0.96 + 0.04 * be
-            cw, ch = int(IG_CARD_W * scale), int(IG_CARD_H * scale)
-            ox, oy = cx + (IG_CARD_W - cw) // 2, IG_CARDS_Y + (IG_CARD_H - ch) // 2
-            bl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            ImageDraw.Draw(bl).rounded_rectangle(
-                [ox, oy, ox + cw, oy + ch], radius=8,
-                outline=(255, 255, 255, int(255 * be)), width=IG_STROKE)
-            img = Image.alpha_composite(img, bl)
-            img = _blur_in_text(img, (cx + 40, IG_CARDS_Y + 44), f"0{i+1}",
-                                fonts["num"], t, cstart + 0.10)
-            uage = t - (cstart + 0.20)
-            if uage >= 0:
-                ue = _ease(min(uage / 0.3, 1.0))
-                ul = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-                ImageDraw.Draw(ul).rectangle(
-                    [cx + 42, IG_CARDS_Y + 150, cx + 42 + int(60 * ue), IG_CARDS_Y + 156],
-                    fill=(255, 255, 255, 255))
-                img = Image.alpha_composite(img, ul)
-            img = _blur_in_text(img, (cx + 40, IG_CARDS_Y + 200),
-                                (card.get("title") or "").upper(), fonts["title"],
-                                t, cstart + 0.26)
-            dage = t - (cstart + 0.40)
-            if dage >= 0:
-                de = _ease(min(dage / ENTRANCE, 1.0))
-                dl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-                dd = ImageDraw.Draw(dl)
-                words = (card.get("description") or "").split()
-                lines, cur = [], []
-                for w in words:
-                    if dd.textbbox((0, 0), " ".join(cur + [w]), font=fonts["desc"])[2] > IG_CARD_W - 90 and cur:
-                        lines.append(" ".join(cur)); cur = [w]
-                    else:
-                        cur.append(w)
-                if cur:
-                    lines.append(" ".join(cur))
-                yy = IG_CARDS_Y + 290
-                for ln in lines:
-                    dd.text((cx + 40, yy), ln, font=fonts["desc"], fill=(*GREY, int(255 * de)))
-                    yy += 34
-                img = Image.alpha_composite(img, dl)
+        img = _header(img, header, subtitle, fonts, t)
+        img = draw_tpl(img, t, cards, fonts)
         img.convert("RGB").save(out_dir / f"f_{f:04d}.png")
     return n
 
@@ -301,5 +546,7 @@ def render_infographic_clip(card, font_dir, work_dir, clip_path,
     header = card.get("overall_title") or card.get("title") or ""
     subtitle = card.get("subtitle") or ""
     cards = card.get("cards") or []
-    render_infographic_frames(header, subtitle, cards, font_dir, work_dir, entrance_secs)
+    template = card.get("template") or "three-cards"
+    render_infographic_frames(header, subtitle, cards, font_dir, work_dir,
+                              entrance_secs, template=template)
     return encode_clip(work_dir, clip_path, entrance_secs, hold_secs)
