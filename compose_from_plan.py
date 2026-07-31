@@ -56,6 +56,74 @@ OVERLAY_Y = 0
 
 
 @dataclass
+class TimedClip:
+    """One ANIMATED clip scheduled onto the base video timeline.
+
+    clip: an opaque MP4 (entrance animation + frozen last frame) authored at
+    1920x1080. It is overlaid onto the base video starting at `start`, covering
+    the frame for `hold` seconds, with a short alpha fade in/out so the cut
+    to/from the talking head is smooth. The entrance motion is baked into the
+    clip itself — no ffmpeg cross-fade fakery.
+    """
+    clip: Path
+    start: float
+    hold: float
+
+
+def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) -> Path:
+    """Overlay animated cutaway clips onto the base video.
+
+    Each clip is a real video input (not `-loop 1` on a static PNG). We shift
+    its PTS to `start`, fade its alpha in/out over FADE seconds for a clean cut
+    to/from the base, and enable the overlay only within its window.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not clips:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(base_video),
+             "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
+                    f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2",
+             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+             "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
+             str(out_path)],
+            check=True)
+        return out_path
+
+    clips = sorted(clips, key=lambda c: c.start)
+    cmd: list[str] = ["ffmpeg", "-y", "-i", str(base_video)]
+    for c in clips:
+        cmd += ["-i", str(c.clip)]
+
+    parts = [
+        f"[0:v]scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
+        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2[base];"
+    ]
+    prev = "[base]"
+    for i, c in enumerate(clips, start=1):
+        end = c.start + c.hold
+        fade_out = max(c.start, end - FADE)
+        parts.append(
+            f"[{i}:v]scale={TARGET_W}:{TARGET_H},format=yuva420p,"
+            f"setpts=PTS+{c.start}/TB,"
+            f"fade=t=in:st={c.start}:d={FADE}:alpha=1,"
+            f"fade=t=out:st={fade_out}:d={FADE}:alpha=1[a{i}];"
+        )
+        cur = f"[v{i}]"
+        parts.append(
+            f"{prev}[a{i}]overlay=enable='between(t,{c.start},{end})':shortest=0{cur};"
+        )
+        prev = cur
+    graph = "".join(parts).rstrip(";").replace(prev, "[vout]", 1)
+
+    cmd += ["-filter_complex", graph, "-map", "[vout]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-shortest",
+            "-movflags", "+faststart", str(out_path)]
+    subprocess.run(cmd, check=True)
+    return out_path
+
+
+@dataclass
 class TimedAsset:
     """One PNG scheduled onto the base video timeline.
 

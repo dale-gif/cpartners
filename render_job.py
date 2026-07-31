@@ -22,18 +22,17 @@ import requests
 
 from compose_from_plan import (
     INFOGRAPHIC_HOLD,
-    INFOGRAPHIC_TARGET_H,
-    INFOGRAPHIC_TARGET_W,
-    INFOGRAPHIC_X,
-    INFOGRAPHIC_Y,
     OVERLAY_HOLD,
-    OVERLAY_X,
-    OVERLAY_Y,
-    TimedAsset,
-    composite,
+    TimedClip,
+    composite_clips,
 )
-from graphic_cards import render_infographic, render_infographic_single
-from kinetic_words import render_overlay
+from animations import render_infographic_clip, render_overlay_clip
+
+# How long each cutaway's entrance animation runs before it holds on the final
+# frame. The clip's total on-screen time is `hold`; entrance is the first
+# ENTRANCE_SECS of that.
+INFOGRAPHIC_ENTRANCE = 3.0
+OVERLAY_ENTRANCE = 1.6
 
 OPUS_URL = os.environ["OPUS_CLIP_URL"]
 VIDEO_ID = os.environ["VIDEO_ID"]
@@ -294,50 +293,42 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     return plan
 
 
-def build_assets(plan: dict) -> list[TimedAsset]:
-    assets: list[TimedAsset] = []
-    # Infographics: rendered as 4 animation frames (staggered element reveal).
-    # Frame timing within the hold window:
-    #   frame 0 (header only):  starts at timestamp, holds 1.5s
-    #   frame 1 (+element 1):   starts at timestamp+1.5, holds 1.5s
-    #   frame 2 (+elements 1-2): starts at timestamp+3.0, holds 1.5s
-    #   frame 3 (full state):   starts at timestamp+4.5, holds rest of hold time
-    FRAME_STAGGER = 1.5  # seconds between each frame reveal
+def build_assets(plan: dict) -> list[TimedClip]:
+    """Render each planned moment as a TRUE animated cutaway clip.
+
+    Infographics and text overlays are each rendered to their own opaque MP4
+    (entrance motion baked in + final frame frozen to fill the hold). The
+    compositor overlays these clips onto the base video — no static-PNG
+    cross-fade fakery.
+    """
+    clips: list[TimedClip] = []
     for i, card in enumerate(plan.get("infographics") or []):
-        frame_pngs = render_infographic(card, FONT_DIR, WORK / f"card_{i}.png")
-        base_start = float(card.get("timestamp", 0))
-        total_hold = float(card.get("hold", INFOGRAPHIC_HOLD))
-        num_frames = len(frame_pngs)
-        for f_idx, png in enumerate(frame_pngs):
-            frame_start = base_start + f_idx * FRAME_STAGGER
-            if f_idx < num_frames - 1:
-                frame_hold = FRAME_STAGGER + 0.5  # slight overlap for crossfade
-            else:
-                # Last frame holds for the remainder of the total hold time
-                frame_hold = max(2.0, total_hold - f_idx * FRAME_STAGGER)
-            assets.append(TimedAsset(
-                png=png,
-                start=frame_start,
-                hold=frame_hold,
-                x=INFOGRAPHIC_X, y=INFOGRAPHIC_Y,
-                target_w=INFOGRAPHIC_TARGET_W, target_h=INFOGRAPHIC_TARGET_H,
-            ))
-    # Text overlays: authored natively at the safe zone size, no scaling.
-    for i, ov in enumerate(plan.get("text_overlays") or []):
-        png = render_overlay(
-            lines=list(ov.get("lines") or []),
-            style=(ov.get("style") or "black-gradient"),
+        hold = float(card.get("hold", INFOGRAPHIC_HOLD))
+        clip = render_infographic_clip(
+            card=card,
             font_dir=FONT_DIR,
-            out_path=WORK / f"overlay_{i}.png",
+            work_dir=WORK / f"ig_{i}_frames",
+            clip_path=WORK / f"ig_{i}.mp4",
+            entrance_secs=min(INFOGRAPHIC_ENTRANCE, hold),
+            hold_secs=hold,
         )
-        assets.append(TimedAsset(
-            png=png,
-            start=float(ov.get("timestamp", 0)),
-            hold=float(ov.get("hold", OVERLAY_HOLD)),
-            x=OVERLAY_X, y=OVERLAY_Y,
-        ))
-    assets.sort(key=lambda a: a.start)
-    return assets
+        clips.append(TimedClip(clip=clip, start=float(card.get("timestamp", 0)), hold=hold))
+
+    for i, ov in enumerate(plan.get("text_overlays") or []):
+        hold = float(ov.get("hold", OVERLAY_HOLD))
+        clip = render_overlay_clip(
+            lines=list(ov.get("lines") or []),
+            style=(ov.get("style") or "big-text"),
+            font_dir=FONT_DIR,
+            work_dir=WORK / f"ov_{i}_frames",
+            clip_path=WORK / f"ov_{i}.mp4",
+            entrance_secs=min(OVERLAY_ENTRANCE, hold),
+            hold_secs=hold,
+        )
+        clips.append(TimedClip(clip=clip, start=float(ov.get("timestamp", 0)), hold=hold))
+
+    clips.sort(key=lambda c: c.start)
+    return clips
 
 
 def main() -> None:
@@ -376,8 +367,8 @@ def main() -> None:
             f"lines={ov.get('lines')}")
 
     log("[5/5] composite")
-    assets = build_assets(plan)
-    composite(video, assets, final)
+    clips = build_assets(plan)
+    composite_clips(video, clips, final)
     log(f"final → {final} ({final.stat().st_size / 1024 / 1024:.1f} MB)")
 
     # Rename to the target filename and put it at a stable location the
