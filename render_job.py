@@ -32,7 +32,7 @@ from compose_from_plan import (
     TimedAsset,
     composite,
 )
-from graphic_cards import render_infographic
+from graphic_cards import render_infographic, render_infographic_single
 from kinetic_words import render_overlay
 
 OPUS_URL = os.environ["OPUS_CLIP_URL"]
@@ -70,13 +70,13 @@ CLAUDE_SYSTEM = (
     "  cards[3]       : EXACTLY 3. Each: title 1-2 words CAPS <=12 chars; "
     "                  description 2-3 short phrases CAPS <=60 chars total.\n\n"
     "TEMPLATES (pick the one that best fits the beat):\n"
-    "  * three-cards      — DEFAULT. 3 bordered cards side-by-side. Use for lists, principles, categories.\n"
-    "  * three-columns    — 3 columns with a simple icon, no boxes. Use for tips or benefits.\n"
-    "  * timeline         — 3 numbered SQUARES side-by-side (no connecting line). Use for sequential steps or a journey.\n"
-    "  * numbered-list    — Vertical 01/02/03 rows. Use for instructions or ranked items.\n"
-    "  * circle-diagram   — 3-segment ring + labels. Use for parts of a whole or overlapping ideas.\n"
-    "  * problem-solution — Problem → Cause → Solution boxes with arrows. Use for issue analysis.\n"
-    "  * checklist        — 3 checkbox rows. Use for best-practices or a to-do.\n\n"
+    "  * three-cards      — DEFAULT. 3 bordered cards side-by-side with centered numbers, dividers, titles. Use for lists, principles, categories.\n"
+    "  * three-columns    — 3 columns with circle icon placeholders + vertical dividers between columns. Use for tips or benefits.\n"
+    "  * timeline         — 3 numbered CIRCLES connected by a horizontal line. Use for sequential steps or a journey.\n"
+    "  * numbered-list    — Vertical 01/02/03 rows with divider bars + horizontal separators. Use for instructions or ranked items.\n"
+    "  * circle-diagram   — 3-segment ring on left + numbered legend with dividers on right. Use for parts of a whole or overlapping ideas.\n"
+    "  * problem-solution — Problem / Cause / Solution with large icon boxes (warning, magnifier, badge). Use for issue analysis.\n"
+    "  * checklist        — 3 rows with plus-sign icons in bordered squares + horizontal separators. Use for best-practices or a to-do.\n\n"
     "TEXT OVERLAY SCHEMA: exactly 3 lines per overlay; each line 1-5 words, "
     "<=14 chars. Punchy. Rule of 3. Break aggressively: "
     "'THE RELATIONSHIP IS DAMAGED YOU FEEL IT' becomes "
@@ -288,16 +288,32 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
 
 def build_assets(plan: dict) -> list[TimedAsset]:
     assets: list[TimedAsset] = []
-    # Infographics: authored at 1920x1080, scaled down to fit the safe zone.
+    # Infographics: rendered as 4 animation frames (staggered element reveal).
+    # Frame timing within the hold window:
+    #   frame 0 (header only):  starts at timestamp, holds 1.5s
+    #   frame 1 (+element 1):   starts at timestamp+1.5, holds 1.5s
+    #   frame 2 (+elements 1-2): starts at timestamp+3.0, holds 1.5s
+    #   frame 3 (full state):   starts at timestamp+4.5, holds rest of hold time
+    FRAME_STAGGER = 1.5  # seconds between each frame reveal
     for i, card in enumerate(plan.get("infographics") or []):
-        png = render_infographic(card, FONT_DIR, WORK / f"card_{i}.png")
-        assets.append(TimedAsset(
-            png=png,
-            start=float(card.get("timestamp", 0)),
-            hold=float(card.get("hold", INFOGRAPHIC_HOLD)),
-            x=INFOGRAPHIC_X, y=INFOGRAPHIC_Y,
-            target_w=INFOGRAPHIC_TARGET_W, target_h=INFOGRAPHIC_TARGET_H,
-        ))
+        frame_pngs = render_infographic(card, FONT_DIR, WORK / f"card_{i}.png")
+        base_start = float(card.get("timestamp", 0))
+        total_hold = float(card.get("hold", INFOGRAPHIC_HOLD))
+        num_frames = len(frame_pngs)
+        for f_idx, png in enumerate(frame_pngs):
+            frame_start = base_start + f_idx * FRAME_STAGGER
+            if f_idx < num_frames - 1:
+                frame_hold = FRAME_STAGGER + 0.5  # slight overlap for crossfade
+            else:
+                # Last frame holds for the remainder of the total hold time
+                frame_hold = max(2.0, total_hold - f_idx * FRAME_STAGGER)
+            assets.append(TimedAsset(
+                png=png,
+                start=frame_start,
+                hold=frame_hold,
+                x=INFOGRAPHIC_X, y=INFOGRAPHIC_Y,
+                target_w=INFOGRAPHIC_TARGET_W, target_h=INFOGRAPHIC_TARGET_H,
+            ))
     # Text overlays: authored natively at the safe zone size, no scaling.
     for i, ov in enumerate(plan.get("text_overlays") or []):
         png = render_overlay(
