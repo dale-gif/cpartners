@@ -144,13 +144,14 @@ def _t_layout(text, font_dir):
     return font, lines, line_h, (H - total_h) // 2, total_h
 
 
-def render_title_frames(text, font_dir, out_dir, entrance_secs):
+def render_title_frames(text, font_dir, out_dir, entrance_secs, transparent=False):
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     font, lines, line_h, y0, total_h = _t_layout(text, font_dir)
     n = int(entrance_secs * FPS)
+    bg = (0, 0, 0, 0) if transparent else BLACK
     for f in range(n):
         t = f / FPS
-        img = Image.new("RGBA", (W, H), BLACK)
+        img = Image.new("RGBA", (W, H), bg)
         draw = ImageDraw.Draw(img)
         lp = _ease(min(t / T_LINE_DRAW, 1.0))
         if lp > 0:
@@ -172,7 +173,10 @@ def render_title_frames(text, font_dir, out_dir, entrance_secs):
             tl.putalpha(Image.composite(tl.getchannel("A"),
                                         Image.new("L", (W, H), 0), mask))
             img = Image.alpha_composite(img, tl)
-        img.convert("RGB").save(out_dir / f"f_{f:04d}.png")
+        if transparent:
+            img.save(out_dir / f"f_{f:04d}.png")           # keep alpha
+        else:
+            img.convert("RGB").save(out_dir / f"f_{f:04d}.png")
     return n
 
 
@@ -523,6 +527,23 @@ def encode_clip(frames_dir, out_path, entrance_secs, hold_secs, fps=FPS):
     return out_path
 
 
+def encode_clip_alpha(frames_dir, out_path, entrance_secs, hold_secs, fps=FPS):
+    """Encode an RGBA frame sequence to a VP9 .webm that PRESERVES ALPHA, so
+    the overlay can sit on top of the avatar video with the background showing
+    through. Last frame is cloned to fill the hold."""
+    frames_dir = Path(frames_dir)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    freeze = max(0.0, hold_secs - entrance_secs)
+    subprocess.run(
+        ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(frames_dir / "f_%04d.png"),
+         "-vf", f"tpad=stop_mode=clone:stop_duration={freeze:.3f}",
+         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "24",
+         str(out_path)],
+        check=True, capture_output=True)
+    return out_path
+
+
 # public high-level helpers ---------------------------------------------------
 def render_overlay_clip(lines, style, font_dir, work_dir, clip_path,
                         entrance_secs, hold_secs):
@@ -532,11 +553,15 @@ def render_overlay_clip(lines, style, font_dir, work_dir, clip_path,
     to big-text motion on black for now (transparent letterbox variant TBD).
     """
     work_dir = Path(work_dir)
+    clip_path = Path(clip_path)
     text = " ".join(l.strip() for l in lines if l and l.strip())
     if style == "title":
-        render_title_frames(text, font_dir, work_dir, entrance_secs)
-    else:  # big-text (and black-gradient fallback)
-        render_big_text_frames(text, font_dir, work_dir, entrance_secs)
+        # Transparent side overlay — avatar stays visible behind it.
+        render_title_frames(text, font_dir, work_dir, entrance_secs, transparent=True)
+        webm = clip_path.with_suffix(".webm")
+        return encode_clip_alpha(work_dir, webm, entrance_secs, hold_secs)
+    # big-text (and black-gradient fallback): opaque cutaway
+    render_big_text_frames(text, font_dir, work_dir, entrance_secs)
     return encode_clip(work_dir, clip_path, entrance_secs, hold_secs)
 
 

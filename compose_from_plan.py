@@ -73,6 +73,7 @@ class TimedClip:
     clip: Path
     start: float
     hold: float
+    transparent: bool = False  # True = alpha overlay on top of avatar (full frame)
 
 
 def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) -> Path:
@@ -97,6 +98,10 @@ def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) 
     clips = sorted(clips, key=lambda c: c.start)
     cmd: list[str] = ["ffmpeg", "-y", "-i", str(base_video)]
     for c in clips:
+        # VP9 alpha (transparent overlays) is only decoded by libvpx-vp9; the
+        # default vp9 decoder silently drops the alpha channel, leaving black.
+        if c.transparent:
+            cmd += ["-c:v", "libvpx-vp9"]
         cmd += ["-i", str(c.clip)]
 
     parts = [
@@ -107,8 +112,14 @@ def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) 
     for i, c in enumerate(clips, start=1):
         end = c.start + c.hold
         fade_out = max(c.start, end - FADE)
+        if c.transparent:
+            # Full-frame alpha overlay: avatar + captions stay visible behind it.
+            scale_h = TARGET_H
+        else:
+            # Opaque cutaway: covers only the top so captions show below.
+            scale_h = CUTAWAY_H
         parts.append(
-            f"[{i}:v]scale={TARGET_W}:{CUTAWAY_H},format=yuva420p,"
+            f"[{i}:v]scale={TARGET_W}:{scale_h},format=yuva420p,"
             f"setpts=PTS+{c.start}/TB,"
             f"fade=t=in:st={c.start}:d={FADE}:alpha=1,"
             f"fade=t=out:st={fade_out}:d={FADE}:alpha=1[a{i}];"

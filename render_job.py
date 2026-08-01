@@ -332,16 +332,19 @@ def build_assets(plan: dict) -> list[TimedClip]:
 
     for i, ov in enumerate(plan.get("text_overlays") or []):
         hold = float(ov.get("hold", OVERLAY_HOLD))
+        style = ov.get("style") or "big-text"
+        transparent = style == "title"  # title is a see-through side overlay
         clip = render_overlay_clip(
             lines=list(ov.get("lines") or []),
-            style=(ov.get("style") or "big-text"),
+            style=style,
             font_dir=FONT_DIR,
             work_dir=WORK / f"ov_{i}_frames",
             clip_path=WORK / f"ov_{i}.mp4",
             entrance_secs=min(OVERLAY_ENTRANCE, hold),
             hold_secs=hold,
         )
-        clips.append(TimedClip(clip=clip, start=float(ov.get("timestamp", 0)), hold=hold))
+        clips.append(TimedClip(clip=clip, start=float(ov.get("timestamp", 0)),
+                               hold=hold, transparent=transparent))
 
     clips.sort(key=lambda c: c.start)
     return clips
