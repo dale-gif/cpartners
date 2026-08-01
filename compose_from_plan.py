@@ -114,12 +114,13 @@ def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) 
         fade_out = max(c.start, end - FADE)
         if c.transparent:
             # Full-frame alpha overlay: avatar + captions stay visible behind it.
-            scale_h = TARGET_H
+            geom = f"scale={TARGET_W}:{TARGET_H}"
         else:
-            # Opaque cutaway: covers only the top so captions show below.
-            scale_h = CUTAWAY_H
+            # Opaque cutaway: CROP (not scale) the top CUTAWAY_H so the caption
+            # band shows below AND circles stay perfectly round (no squish).
+            geom = f"crop={TARGET_W}:{CUTAWAY_H}:0:0"
         parts.append(
-            f"[{i}:v]scale={TARGET_W}:{scale_h},format=yuva420p,"
+            f"[{i}:v]{geom},format=yuva420p,"
             f"setpts=PTS+{c.start}/TB,"
             f"fade=t=in:st={c.start}:d={FADE}:alpha=1,"
             f"fade=t=out:st={fade_out}:d={FADE}:alpha=1[a{i}];"
