@@ -70,6 +70,9 @@ BT_BASE_DELAY, BT_STAGGER = 0.15, 0.28
 SAFE_TOP, SAFE_BOTTOM = 70, 806
 SAFE_CENTER = (SAFE_TOP + SAFE_BOTTOM) // 2
 SAFE_H = SAFE_BOTTOM - SAFE_TOP
+# Big-text is centered around this Y (middle of the visible frame) for balance;
+# tall multi-line hooks are clamped so they never cross SAFE_BOTTOM.
+BT_VCENTER = 520
 
 
 def _bt_layout(words, font, draw, max_w):
@@ -104,8 +107,10 @@ def _bt_boxes(full_text, font_dir):
     asc, desc = font.getmetrics()
     line_h = asc + desc
     total_h = line_h * len(lines) + BT_LINE_GAP * (len(lines) - 1)
-    # Center within the caption-safe box, not the full frame.
-    y = SAFE_TOP + (SAFE_H - total_h) // 2
+    # Center around the visible-frame middle; clamp so the block never crosses
+    # into the caption band (tall 3-line hooks settle against SAFE_BOTTOM).
+    y = BT_VCENTER - total_h // 2
+    y = max(SAFE_TOP, min(y, SAFE_BOTTOM - total_h))
     space_w = d.textbbox((0, 0), " ", font=font)[2]
     boxes = []
     for line in lines:
