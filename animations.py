@@ -13,6 +13,7 @@ Motion styles (Larry-approved):
 """
 from __future__ import annotations
 
+import math
 import subprocess
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -264,6 +265,113 @@ def _blur_center(img, cx, y, text, font, t, start, fill=(255, 255, 255)):
     return _blur_in_text(img, (cx - _tw(font, text) // 2, y), text, font, t, start, fill)
 
 
+# Icon names the planner can choose from (context-driven line-art glyphs).
+ICON_NAMES = [
+    "document", "search", "warning", "check", "shield", "scales", "person",
+    "people", "phone", "clock", "money", "lock", "flag", "mail", "chart",
+    "edit", "folder", "target", "calendar", "star", "building",
+]
+
+
+def _draw_icon(d, name, cx, cy, s, col, w=3):
+    """Draw a simple white line-art icon centered at (cx, cy), extent ~s."""
+    name = (name or "document").lower().strip()
+
+    def L(x1, y1, x2, y2):
+        d.line([(cx + x1 * s, cy + y1 * s), (cx + x2 * s, cy + y2 * s)], fill=col, width=w)
+
+    def C(x, y, r, fill_=None):
+        d.ellipse([cx + (x - r) * s, cy + (y - r) * s, cx + (x + r) * s, cy + (y + r) * s],
+                  outline=col, width=w, fill=fill_)
+
+    def P(pts, closed=True):
+        pp = [(cx + px * s, cy + py * s) for px, py in pts]
+        if closed:
+            pp.append(pp[0])
+        d.line(pp, fill=col, width=w, joint="curve")
+
+    def A(x, y, r, a0, a1):
+        d.arc([cx + (x - r) * s, cy + (y - r) * s, cx + (x + r) * s, cy + (y + r) * s],
+              a0, a1, fill=col, width=w)
+
+    def RR(x0, y0, x1, y1, r=0.15):
+        d.rounded_rectangle([cx + x0 * s, cy + y0 * s, cx + x1 * s, cy + y1 * s],
+                            radius=int(r * s), outline=col, width=w)
+
+    if name in ("document", "report", "record", "paperwork", "contract", "file"):
+        P([(-0.6, -0.9), (0.35, -0.9), (0.6, -0.6), (0.6, 0.9), (-0.6, 0.9)])
+        L(0.35, -0.9, 0.35, -0.6); L(0.35, -0.6, 0.6, -0.6)
+        L(-0.35, -0.15, 0.35, -0.15); L(-0.35, 0.15, 0.35, 0.15); L(-0.35, 0.45, 0.15, 0.45)
+    elif name in ("search", "investigate", "find", "magnifier"):
+        C(-0.15, -0.15, 0.55); L(0.28, 0.28, 0.75, 0.75)
+    elif name in ("warning", "risk", "danger", "alert"):
+        P([(0, -0.9), (0.92, 0.7), (-0.92, 0.7)]); L(0, -0.28, 0, 0.25); C(0, 0.5, 0.07, col)
+    elif name in ("check", "verify", "done", "approve", "success"):
+        C(0, 0, 0.85); L(-0.36, 0.02, -0.08, 0.34); L(-0.08, 0.34, 0.42, -0.3)
+    elif name in ("shield", "protect", "defend", "secure"):
+        P([(0, -0.92), (0.78, -0.55), (0.78, 0.15), (0, 0.92), (-0.78, 0.15), (-0.78, -0.55)])
+        L(-0.32, 0.0, -0.06, 0.3); L(-0.06, 0.3, 0.36, -0.28)
+    elif name in ("scales", "legal", "court", "liability", "law", "justice"):
+        L(0, -0.85, 0, 0.72); L(-0.5, 0.72, 0.5, 0.72); L(-0.82, -0.62, 0.82, -0.62)
+        L(0, -0.85, 0, -0.62)
+        L(-0.82, -0.62, -0.82, -0.32); A(-0.82, -0.32, 0.3, 0, 180)
+        L(0.82, -0.62, 0.82, -0.32); A(0.82, -0.32, 0.3, 0, 180)
+    elif name in ("person", "director", "individual", "user"):
+        C(0, -0.45, 0.33); A(0, 0.95, 0.62, 180, 360)
+    elif name in ("people", "team", "parties", "group"):
+        # overlapping two-figure (back-right smaller, front-left larger) so it
+        # reads clearly as people and not a symmetrical "face"
+        C(0.34, -0.36, 0.2); A(0.34, 0.72, 0.36, 200, 340)
+        C(-0.2, -0.12, 0.27); A(-0.2, 1.02, 0.5, 180, 360)
+    elif name in ("phone", "contact", "call"):
+        RR(-0.5, -0.85, 0.5, 0.85, 0.18); L(-0.16, 0.62, 0.16, 0.62)
+    elif name in ("clock", "time", "deadline", "urgent"):
+        C(0, 0, 0.85); L(0, 0, 0, -0.5); L(0, 0, 0.4, 0.16)
+    elif name in ("money", "payment", "debt", "cost", "cash", "dollar"):
+        C(0, 0, 0.85); L(0, -0.62, 0, 0.62); A(0, -0.28, 0.3, 60, 300); A(0, 0.28, 0.3, -120, 120)
+    elif name in ("lock", "protection", "safe"):
+        RR(-0.58, -0.05, 0.58, 0.8, 0.1); A(0, -0.05, 0.36, 180, 360)
+        L(-0.36, -0.05, -0.36, -0.22); L(0.36, -0.05, 0.36, -0.22)
+        C(0, 0.28, 0.08, col); L(0, 0.32, 0, 0.55)
+    elif name in ("flag", "mark", "milestone"):
+        L(-0.5, -0.9, -0.5, 0.9); P([(-0.5, -0.9), (0.62, -0.58), (-0.5, -0.26)])
+    elif name in ("mail", "letter", "notice", "envelope", "message"):
+        RR(-0.85, -0.6, 0.85, 0.6, 0.06); L(-0.85, -0.5, 0, 0.1); L(0, 0.1, 0.85, -0.5)
+    elif name in ("chart", "growth", "results", "data", "graph"):
+        L(-0.72, -0.8, -0.72, 0.72); L(-0.72, 0.72, 0.8, 0.72)
+        RR(-0.55, 0.2, -0.28, 0.72, 0.0); RR(-0.12, -0.15, 0.15, 0.72, 0.0); RR(0.32, -0.55, 0.6, 0.72, 0.0)
+    elif name in ("edit", "sign", "pencil", "write"):
+        L(-0.62, 0.62, 0.42, -0.42); L(-0.42, 0.78, 0.58, -0.26)
+        L(-0.62, 0.62, -0.42, 0.78); L(0.42, -0.42, 0.72, -0.58); L(0.58, -0.26, 0.72, -0.58)
+    elif name in ("folder", "organize", "case"):
+        P([(-0.8, -0.45), (-0.15, -0.45), (0.02, -0.2), (0.8, -0.2), (0.8, 0.6), (-0.8, 0.6)])
+    elif name in ("target", "goal", "focus", "aim"):
+        C(0, 0, 0.9); C(0, 0, 0.5); C(0, 0, 0.1, col)
+    elif name in ("calendar", "schedule", "date", "book"):
+        RR(-0.75, -0.62, 0.75, 0.72, 0.08); L(-0.75, -0.28, 0.75, -0.28)
+        L(-0.4, -0.85, -0.4, -0.45); L(0.4, -0.85, 0.4, -0.45)
+        for gx in (-0.4, 0.0, 0.4):
+            for gy in (0.05, 0.42):
+                C(gx, gy, 0.07, col)
+    elif name in ("star", "best", "quality", "premium"):
+        pts = []
+        for k in range(5):
+            ao = math.radians(-90 + 72 * k)
+            pts.append((0.95 * math.cos(ao), 0.95 * math.sin(ao)))
+            ai = math.radians(-90 + 72 * k + 36)
+            pts.append((0.42 * math.cos(ai), 0.42 * math.sin(ai)))
+        P(pts)
+    elif name in ("building", "company", "business", "office"):
+        RR(-0.6, -0.85, 0.6, 0.8, 0.0)
+        for gx in (-0.3, 0.05, 0.4):
+            for gy in (-0.55, -0.2, 0.15):
+                d.rectangle([cx + (gx - 0.09) * s, cy + (gy - 0.09) * s,
+                             cx + (gx + 0.09) * s, cy + (gy + 0.09) * s], outline=col, width=w)
+        d.rectangle([cx - 0.16 * s, cy + 0.45 * s, cx + 0.16 * s, cy + 0.8 * s], outline=col, width=w)
+    else:  # default → document
+        _draw_icon(d, "document", cx, cy, s, col, w)
+
+
 # Content fills the caption-safe area (top ~880px); captions ride below.
 # Elements are sized/spread to match the Larry-approved templates.
 
@@ -313,7 +421,11 @@ def _tpl_three_columns(img, t, cards, fonts):
                 [(x, 210), (x, 210 + h)], fill=(120, 120, 120, 255), width=2), 1.0)
         img = _fade_layer(img, lambda d, al, m=mid: d.ellipse(
             [m - 60, ICON_Y, m + 60, ICON_Y + 120], outline=(255, 255, 255, al), width=3), a)
-        img = _blur_center(img, mid, ICON_Y + 46, "ICON", fonts["ic"], t, s + 0.06, fill=GREY)
+        # context icon chosen by the planner (falls back to a document glyph)
+        ia = _lerp_alpha(t, s + 0.06)
+        if ia > 0:
+            img = _fade_layer(img, lambda d, al, m=mid, ic=card.get("icon"): _draw_icon(
+                d, ic, m, ICON_Y + 60, 34, (255, 255, 255, al), w=3), ia)
         img = _blur_center(img, mid, NUM_Y, _num(i), fonts["num"], t, s + 0.12)
         ue = _lerp_alpha(t, s + 0.22, 0.3)
         if ue > 0:
