@@ -105,6 +105,13 @@ CLAUDE_SYSTEM = (
     "'STOP GUESSING'). Break into 3 lines of 1-3 words each using the Rule "
     "of 3 (e.g. ['DON\\'T', 'WAIT', 'ACT NOW']). The hook overlay MUST use "
     "style 'big-text' — massive centered text on black for maximum impact.\n\n"
+    "TITLE CARD (HARD): exactly ONE text overlay MUST use style 'title'. It is "
+    "a section/chapter title that introduces the main topic — a 2-4 word CAPS "
+    "phrase naming what this segment is about (e.g. 'THE PHOENIX TRAP', 'HOW "
+    "IT HAPPENS', 'WHAT YOU CAN DO'). Place it at a natural section start — "
+    "right after the hook (roughly 20-40s in) or at the first clear topic "
+    "transition. Give it 1-2 lines. This is separate from and in addition to "
+    "the hook; the hook is 'big-text', the title card is 'title'.\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
     "{\"infographics\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
@@ -290,6 +297,15 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     elif hook_count > 1:
         log(f"note: {hook_count} overlays landed in the hook window "
             f"(only 1 required, but fine)")
+
+    title_count = sum(
+        1 for ov in plan["text_overlays"] if ov.get("style") == "title"
+    )
+    if title_count == 0:
+        log("WARNING: no 'title' style overlay (Claude must include exactly one "
+            "section title card — check prompt output)")
+    else:
+        log(f"title card(s): {title_count}")
     return plan
 
 
