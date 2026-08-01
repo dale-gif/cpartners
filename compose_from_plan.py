@@ -26,6 +26,11 @@ TARGET_W = 1920
 TARGET_H = 1080
 SCALE = 1.0  # overlays and infographics are authored at 1920x1080 natively
 
+# Animated cutaways cover only the TOP of the frame so OpusClip's baked-in
+# caption band (the bottom ~200px, on its own black letterbox) stays visible.
+# Both the cutaway and the caption band are black, so the seam is invisible.
+CUTAWAY_H = 880  # cutaway clips scale to 1920xCUTAWAY_H, overlaid at y=0
+
 # Frame-left "safe zone" (Larry-approved) — the red box in reference shots.
 # All overlays and infographics must sit entirely within this box in the
 # 1920x1080 output frame:
@@ -103,14 +108,14 @@ def composite_clips(base_video: Path, clips: list["TimedClip"], out_path: Path) 
         end = c.start + c.hold
         fade_out = max(c.start, end - FADE)
         parts.append(
-            f"[{i}:v]scale={TARGET_W}:{TARGET_H},format=yuva420p,"
+            f"[{i}:v]scale={TARGET_W}:{CUTAWAY_H},format=yuva420p,"
             f"setpts=PTS+{c.start}/TB,"
             f"fade=t=in:st={c.start}:d={FADE}:alpha=1,"
             f"fade=t=out:st={fade_out}:d={FADE}:alpha=1[a{i}];"
         )
         cur = f"[v{i}]"
         parts.append(
-            f"{prev}[a{i}]overlay=enable='between(t,{c.start},{end})':shortest=0{cur};"
+            f"{prev}[a{i}]overlay=x=0:y=0:enable='between(t,{c.start},{end})':shortest=0{cur};"
         )
         prev = cur
     graph = "".join(parts).rstrip(";").replace(prev, "[vout]", 1)
