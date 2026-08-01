@@ -65,6 +65,12 @@ def _blur_in_text(img, xy, text, font, t, start, fill=(255, 255, 255),
 BT_MAX_W, BT_MAX_SIZE, BT_MIN_SIZE, BT_LINE_GAP = 1500, 210, 70, 24
 BT_BASE_DELAY, BT_STAGGER = 0.15, 0.28
 
+# Cutaway content must stay ABOVE the caption band (a "danger zone" margin sits
+# between content and captions). Content is vertically centered in this box.
+SAFE_TOP, SAFE_BOTTOM = 70, 806
+SAFE_CENTER = (SAFE_TOP + SAFE_BOTTOM) // 2
+SAFE_H = SAFE_BOTTOM - SAFE_TOP
+
 
 def _bt_layout(words, font, draw, max_w):
     lines, cur = [], []
@@ -82,11 +88,15 @@ def _bt_boxes(full_text, font_dir):
     words = full_text.upper().split()
     d = ImageDraw.Draw(Image.new("RGBA", (W, H)))
     size = BT_MAX_SIZE
+    # Shrink until the text fits BOTH the width AND the safe height (so tall
+    # multi-line hooks never spill into the caption band).
     while size > BT_MIN_SIZE:
         font = _font(font_dir, "Inter-Black.ttf", size)
         lines = _bt_layout(words, font, d, BT_MAX_W)
         widest = max(d.textbbox((0, 0), " ".join(l), font=font)[2] for l in lines)
-        if widest <= BT_MAX_W:
+        asc, desc = font.getmetrics()
+        block_h = (asc + desc) * len(lines) + BT_LINE_GAP * (len(lines) - 1)
+        if widest <= BT_MAX_W and block_h <= SAFE_H:
             break
         size -= 6
     font = _font(font_dir, "Inter-Black.ttf", size)
@@ -94,7 +104,8 @@ def _bt_boxes(full_text, font_dir):
     asc, desc = font.getmetrics()
     line_h = asc + desc
     total_h = line_h * len(lines) + BT_LINE_GAP * (len(lines) - 1)
-    y = (H - total_h) // 2
+    # Center within the caption-safe box, not the full frame.
+    y = SAFE_TOP + (SAFE_H - total_h) // 2
     space_w = d.textbbox((0, 0), " ", font=font)[2]
     boxes = []
     for line in lines:
@@ -377,7 +388,7 @@ def _draw_icon(d, name, cx, cy, s, col, w=3):
 
 # --- template: three-cards ---------------------------------------------------
 def _tpl_three_cards(img, t, cards, fonts):
-    CW, CH, GAP, CY = 500, 600, 50, 205
+    CW, CH, GAP, CY = 500, 580, 50, 190
     x0 = (W - (3 * CW + 2 * GAP)) // 2
     for i, card in enumerate(cards):
         s = IG_ITEM0 + i * IG_STAGGER
@@ -465,7 +476,7 @@ def _tpl_timeline(img, t, cards, fonts):
 
 # --- template: numbered-list -------------------------------------------------
 def _tpl_numbered_list(img, t, cards, fonts):
-    x0, y0, rowh = 150, 215, 210
+    x0, y0, rowh = 150, 205, 195
     for i, card in enumerate(cards):
         s = IG_ITEM0 + i * IG_STAGGER
         a = _lerp_alpha(t, s)
@@ -568,7 +579,7 @@ def _tpl_problem_solution(img, t, cards, fonts):
 
 # --- template: checklist -----------------------------------------------------
 def _tpl_checklist(img, t, cards, fonts):
-    x0, y0, rowh, box = 150, 215, 205, 120
+    x0, y0, rowh, box = 150, 205, 195, 120
     for i, card in enumerate(cards):
         s = IG_ITEM0 + i * IG_STAGGER
         a = _lerp_alpha(t, s)
