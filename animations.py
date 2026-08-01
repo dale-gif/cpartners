@@ -104,22 +104,25 @@ def _bt_boxes(full_text, font_dir):
         size -= 6
     font = _font(font_dir, "Inter-Black.ttf", size)
     lines = _bt_layout(words, font, d, BT_MAX_W)
-    asc, desc = font.getmetrics()
-    line_h = asc + desc
-    total_h = line_h * len(lines) + BT_LINE_GAP * (len(lines) - 1)
-    # Center around the visible-frame middle; clamp so the block never crosses
-    # into the caption band (tall 3-line hooks settle against SAFE_BOTTOM).
-    y = BT_VCENTER - total_h // 2
-    y = max(SAFE_TOP, min(y, SAFE_BOTTOM - total_h))
+    # Center the ACTUAL INK of the caps, not the font metric box (which has big
+    # ascender/descender padding). Otherwise short hooks look top-heavy with
+    # dead space below. Probe cap ink extent for this font size:
+    probe = d.textbbox((0, 0), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", font=font)
+    top_pad = probe[1]                    # origin → top of ink
+    cap_h = probe[3] - probe[1]           # visible cap height
+    advance = cap_h + BT_LINE_GAP
+    total_visual = cap_h * len(lines) + BT_LINE_GAP * (len(lines) - 1)
+    ink_top = BT_VCENTER - total_visual // 2
+    ink_top = max(SAFE_TOP, min(ink_top, SAFE_BOTTOM - total_visual))
     space_w = d.textbbox((0, 0), " ", font=font)[2]
     boxes = []
-    for line in lines:
+    for i, line in enumerate(lines):
         lw = d.textbbox((0, 0), " ".join(line), font=font)[2]
         x = (W - lw) // 2
+        y = ink_top + i * advance - top_pad   # draw origin so ink lands centered
         for w in line:
             boxes.append((w, x, y))
             x += d.textbbox((0, 0), w, font=font)[2] + space_w
-        y += line_h + BT_LINE_GAP
     return font, boxes
 
 
