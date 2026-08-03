@@ -162,31 +162,59 @@ def render_big_text_frames(full_text, font_dir, out_dir, entrance_secs):
 # T_MAX_W keeps each line inside the left ~800px; text is balanced into 2 rows.
 T_SIZE, T_LINE_X, T_TEXT_X, T_MAX_W, T_GAP, T_LINE_W = 112, 150, 190, 780, 18, 4
 T_LINE_DRAW, T_TEXT_START, T_TEXT_WIPE, T_SLIDE = 0.35, 0.28, 0.55, 26
+# Keep side-hook text BIG and consistent (Larry-approved). Never shrink below
+# this — instead we wrap into an extra row so long hooks stay large.
+T_MIN_SIZE = 84
+
+
+def _balance(words, rows):
+    """Split `words` into `rows` contiguous groups, minimizing the widest group
+    (by character count). Keeps each line short so the font can stay large."""
+    n = len(words)
+    rows = min(rows, n)
+    if rows <= 1:
+        return [" ".join(words)]
+    best = None
+    if rows == 2:
+        for k in range(1, n):
+            L = [" ".join(words[:k]), " ".join(words[k:])]
+            w = max(len(x) for x in L)
+            if best is None or w < best[0]:
+                best = (w, L)
+    else:  # 3 rows
+        for i in range(1, n - 1):
+            for j in range(i + 1, n):
+                L = [" ".join(words[:i]), " ".join(words[i:j]), " ".join(words[j:])]
+                w = max(len(x) for x in L)
+                if best is None or w < best[0]:
+                    best = (w, L)
+    return best[1]
 
 
 def _t_layout(text, font_dir):
     d = ImageDraw.Draw(Image.new("RGBA", (W, H)))
     words = text.upper().split()
-    # Always balance into TWO rows (unless it's a single word), so the title
-    # reads as a compact block on the left rather than one long line.
-    if len(words) <= 1:
-        lines = [words[0]] if words else [""]
-    else:
-        best = None
-        for k in range(1, len(words)):
-            l1, l2 = " ".join(words[:k]), " ".join(words[k:])
-            diff = abs(len(l1) - len(l2))
-            if best is None or diff < best[0]:
-                best = (diff, [l1, l2])
-        lines = best[1]
-    # Shrink font until every line fits inside the left safe zone (clear of avatar).
-    size = T_SIZE
-    font = _font(font_dir, "Inter-Black.ttf", size)
-    while size > 56:
-        if max(d.textbbox((0, 0), l, font=font)[2] for l in lines) <= T_MAX_W:
-            break
-        size -= 6
+    if not words:
+        font = _font(font_dir, "Inter-Black.ttf", T_SIZE)
+        asc, desc = font.getmetrics(); lh = asc + desc
+        return font, [""], lh, (H - lh) // 2, lh
+    # Choose the row count (1-3) that lets the text render at the LARGEST size
+    # while staying inside the left safe zone (clear of the avatar). Long hooks
+    # wrap into a 3rd row rather than shrinking — so size stays big and even.
+    # Prefer fewer rows on ties.
+    best = None  # (size, lines, font)
+    for rows in range(1, min(3, len(words)) + 1):
+        lines = _balance(words, rows)
+        size = T_SIZE
         font = _font(font_dir, "Inter-Black.ttf", size)
+        while size > T_MIN_SIZE:
+            if max(d.textbbox((0, 0), l, font=font)[2] for l in lines) <= T_MAX_W:
+                break
+            size -= 4
+            font = _font(font_dir, "Inter-Black.ttf", size)
+        if best is None or size > best[0]:
+            best = (size, lines, font)
+    size, lines, font = best
     asc, desc = font.getmetrics()
     line_h = asc + desc
     total_h = line_h * len(lines) + T_GAP * (len(lines) - 1)
