@@ -104,10 +104,10 @@ CLAUDE_SYSTEM = (
     "FRAME: infographic fills the frame (cutaway from Stacey). Text overlays "
     "in 'black-gradient' style land frame-left with Stacey visible frame-right. "
     "Text overlays in 'big-text' or 'title' style are FULL-FRAME cutaways.\n\n"
-    "OUTRO (HARD): the last 15 seconds of the video are the CRP outro "
-    "(\"DM US TODAY\" + disclaimer). NEVER place an infographic or text "
-    "overlay whose (timestamp + hold) crosses into the last 15s. Keep every "
-    "moment fully clear of that zone.\n\n"
+    "OUTRO (HARD): the last 20 seconds of the video are the OpusClip CTA "
+    "outro. NEVER place an infographic or text overlay whose (timestamp + "
+    "hold) crosses into the last 20s. Keep every moment fully clear of that "
+    "zone.\n\n"
     "HOOK CADENCE (HARD): a text overlay MUST land roughly every ~30 seconds "
     "across the whole video — near 30s, 60s, 90s, 120s, and so on, up to the "
     "outro. In each ~30s window pick the single most scroll-stopping thing "
@@ -146,9 +146,10 @@ CLAUDE_SYSTEM = (
 # CRP formats: MF = medium form (3-6 min), LF = long form (6-12 min).
 LF_MIN_SECONDS = 360.0  # 6 min
 
-# Reserve the last N seconds for CRP's outro card ("DM US TODAY" + disclaimer).
-# No overlay or infographic may extend into this zone.
-OUTRO_RESERVED_SECONDS = 15.0
+# Reserve the last N seconds for the CTA outro. The HeyGen CTA card was removed;
+# OpusClip now appends a 20s CTA at the tail of the clip, and this render runs
+# on the OpusClip output — so keep the last 20s fully clear of graphics/overlays.
+OUTRO_RESERVED_SECONDS = 20.0
 
 # Every clip must have at least one punchy text overlay ("hook") landing in
 # the first N seconds, capturing the sentiment peak of the opening beat.
