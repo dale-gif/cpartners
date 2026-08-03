@@ -706,18 +706,20 @@ def render_overlay_clip(lines, style, font_dir, work_dir, clip_path,
                         entrance_secs, hold_secs):
     """Render an animated text-overlay cutaway clip. Returns clip_path.
 
-    style: 'big-text' | 'title' (opaque cutaways). 'black-gradient' falls back
-    to big-text motion on black for now (transparent letterbox variant TBD).
+    style: 'big-text' (opaque full-frame cutaway). 'title' and 'black-gradient'
+    are TRANSPARENT side overlays — the avatar stays visible frame-right while
+    the text animates in frame-left. 'black-gradient' is the recurring hook
+    look (Larry-approved); 'title' is the section title card.
     """
     work_dir = Path(work_dir)
     clip_path = Path(clip_path)
     text = " ".join(l.strip() for l in lines if l and l.strip())
-    if style == "title":
+    if style in ("title", "black-gradient"):
         # Transparent side overlay — avatar stays visible behind it.
         render_title_frames(text, font_dir, work_dir, entrance_secs, transparent=True)
         webm = clip_path.with_suffix(".webm")
         return encode_clip_alpha(work_dir, webm, entrance_secs, hold_secs)
-    # big-text (and black-gradient fallback): opaque cutaway
+    # big-text: opaque full-frame cutaway
     render_big_text_frames(text, font_dir, work_dir, entrance_secs)
     return encode_clip(work_dir, clip_path, entrance_secs, hold_secs)
 

@@ -90,8 +90,8 @@ CLAUDE_SYSTEM = (
     "'THE RELATIONSHIP IS DAMAGED YOU FEEL IT' becomes "
     "['RELATIONSHIP', 'ALREADY DAMAGED', 'YOU FEEL IT']. "
     "  timestamp : seconds — when the line lands.\n"
-    "  hold      : seconds — how long the text stays up. Typical 4-8s. "
-    "              Long enough to read, short enough to feel like a beat.\n"
+    "  hold      : seconds — how long the text stays up. 7-9s (MINIMUM 7). "
+    "              Long enough to read and land as a beat.\n"
     "TEXT OVERLAY STYLES — pick the best fit:\n"
     "  * 'black-gradient' (DEFAULT) — transparent letterbox overlay. Stacey stays "
     "visible frame-right. Text is bold white, frame-left. Use for most overlays.\n"
@@ -108,12 +108,19 @@ CLAUDE_SYSTEM = (
     "(\"DM US TODAY\" + disclaimer). NEVER place an infographic or text "
     "overlay whose (timestamp + hold) crosses into the last 15s. Keep every "
     "moment fully clear of that zone.\n\n"
-    "HOOK OVERLAY (HARD): exactly ONE text overlay MUST land in the first 20 "
-    "seconds. Pick the sentiment peak of the opening beat — the punchiest "
-    "1-3 word phrase Stacey says early (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', "
-    "'STOP GUESSING'). Break into 3 lines of 1-3 words each using the Rule "
-    "of 3 (e.g. ['DON\\'T', 'WAIT', 'ACT NOW']). The hook overlay MUST use "
-    "style 'big-text' — massive centered text on black for maximum impact.\n\n"
+    "HOOK CADENCE (HARD): a text overlay MUST land in EVERY consecutive ~20s "
+    "window of the video — 0-20s, 20-40s, 40-60s, and so on, right up to the "
+    "outro. In each window, pick the single most scroll-stopping thing Stacey "
+    "actually says in that stretch and distil it to a punchy 1-3 word hook "
+    "(e.g. 'DON\\'T WAIT', 'IT COSTS YOU', 'STOP GUESSING', 'THEY WON\\'T PAY'). "
+    "Use the real words/idea from that segment — do NOT repeat the same hook. "
+    "Each overlay holds 7-9s (never less than 7). Break into 1-3 lines using "
+    "the Rule of 3 (a single killer word on its own is fine).\n"
+    "  * The FIRST overlay (0-20s opening hook) MUST use style 'big-text' — "
+    "the massive full-frame black takeover, for maximum cold-open impact.\n"
+    "  * EVERY OTHER hook uses style 'black-gradient' — the transparent side "
+    "overlay that keeps Stacey visible frame-right while the hook animates in "
+    "frame-left. This is the recurring look; use it for all body hooks.\n\n"
     "TITLE CARD (HARD): exactly ONE text overlay MUST use style 'title'. It is "
     "a section/chapter title that introduces the main topic — a SHORT 2-4 word "
     "CAPS phrase (MAX 4 words, never more) naming what this segment is about "
@@ -152,16 +159,24 @@ OUTRO_RESERVED_SECONDS = 15.0
 # the first N seconds, capturing the sentiment peak of the opening beat.
 HOOK_WINDOW_SECONDS = 20.0
 
+# Larry-approved cadence: a punchy hook overlay lands in EVERY ~20s window of
+# the script, each held long enough to read and land as a beat.
+OVERLAY_EVERY_SECONDS = 20.0
+MIN_OVERLAY_HOLD = 7.0
+
 
 def detect_format(duration: float) -> tuple[str, int, int]:
     """Return (format_label, infographic_count, text_overlay_count).
 
-    MF (< 6 min): 2 cards + 3 text overlays.
-    LF (≥ 6 min): 3 cards + 6 text overlays.
+    Text overlays follow a fixed cadence: ONE hook per ~20s of usable runtime
+    (everything before the outro), so viewers get a fresh on-screen hook every
+    20 seconds. Infographics stay at 2 (MF) / 3 (LF).
     """
+    usable = max(0.0, duration - OUTRO_RESERVED_SECONDS)
+    overlay_count = max(3, round(usable / OVERLAY_EVERY_SECONDS))
     if duration < LF_MIN_SECONDS:
-        return "MF", 2, 3
-    return "LF", 3, 6
+        return "MF", 2, overlay_count
+    return "LF", 3, overlay_count
 
 
 def log(msg: str) -> None:
@@ -237,12 +252,16 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         f"HARD CONSTRAINTS:\n"
         f"  * Every (timestamp + hold) MUST be <= {safe_end:.1f}. No item may "
         f"cross into the outro zone.\n"
-        f"  * Exactly one of the {overlay_count} text overlays MUST have "
-        f"timestamp < {HOOK_WINDOW_SECONDS:.0f} (the opening hook). Capture "
-        f"the sentiment peak in 1-3 words per line.\n"
-        f"  * Distribute the remaining {infographic_count} infographics and "
-        f"{overlay_count - 1} body overlays evenly across "
-        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s.\n\n"
+        f"  * Place exactly {overlay_count} text overlays — ONE in each "
+        f"consecutive ~20s window (0-20, 20-40, 40-60, ...) up to "
+        f"{safe_end:.1f}s. Each captures the punchiest 1-3 word hook Stacey "
+        f"says in THAT window; do not repeat hooks.\n"
+        f"  * The first overlay (timestamp < {HOOK_WINDOW_SECONDS:.0f}) uses "
+        f"style 'big-text'; every other overlay uses style 'black-gradient'. "
+        f"Include exactly one 'title' section card among them.\n"
+        f"  * Each text overlay holds 7-9s (NEVER less than 7).\n"
+        f"  * Distribute the {infographic_count} infographics evenly across "
+        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s, spaced apart.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
     )
     r = requests.post(
@@ -274,11 +293,13 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     # we drop or clip.
     safe_end = max(0.0, duration - OUTRO_RESERVED_SECONDS)
 
-    def _guard(items: list, kind: str, default_hold: float) -> list:
+    def _guard(items: list, kind: str, default_hold: float,
+               min_hold: float = 0.0) -> list:
         kept, dropped, clipped = [], [], []
         for it in items or []:
             ts = float(it.get("timestamp", -1))
-            hold = float(it.get("hold", default_hold))
+            hold = max(float(it.get("hold", default_hold)), min_hold)
+            it["hold"] = hold
             if ts < 0 or ts >= safe_end:
                 dropped.append(ts)
                 continue
@@ -296,7 +317,8 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         return kept
 
     plan["infographics"] = _guard(plan.get("infographics"), "infographics", INFOGRAPHIC_HOLD)
-    plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays", OVERLAY_HOLD)
+    plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays",
+                                    MIN_OVERLAY_HOLD, min_hold=MIN_OVERLAY_HOLD)
 
     hook_count = sum(
         1 for ov in plan["text_overlays"]
@@ -343,8 +365,10 @@ def build_assets(plan: dict) -> list[TimedClip]:
 
     for i, ov in enumerate(plan.get("text_overlays") or []):
         hold = float(ov.get("hold", OVERLAY_HOLD))
-        style = ov.get("style") or "big-text"
-        transparent = style == "title"  # title is a see-through side overlay
+        style = ov.get("style") or "black-gradient"
+        # 'title' and 'black-gradient' are see-through side overlays (avatar
+        # stays visible); 'big-text' is the opaque full-frame cutaway.
+        transparent = style in ("title", "black-gradient")
         clip = render_overlay_clip(
             lines=list(ov.get("lines") or []),
             style=style,
