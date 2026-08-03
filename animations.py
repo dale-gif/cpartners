@@ -131,13 +131,26 @@ def _bt_boxes(full_text, font_dir):
 def render_big_text_frames(full_text, font_dir, out_dir, entrance_secs):
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     font, boxes = _bt_boxes(full_text, font_dir)
+    # Adaptive stagger: EVERY word must fully resolve (its start + ENTRANCE) a
+    # hair before the final entrance frame — otherwise the last words freeze
+    # mid-blur-in and read as faint/ghosted (the "missing main words" bug).
+    # Keep the approved 0.28s gap when the hook is short enough to fit; compress
+    # the gap only when there are too many words for the entrance window.
+    n_words = len(boxes)
+    latest_start = max(0.0, entrance_secs - ENTRANCE - 0.12)  # last word starts by here
+    base = min(BT_BASE_DELAY, latest_start)
+    if n_words > 1:
+        room = max(0.0, latest_start - base)
+        stagger = min(BT_STAGGER, room / (n_words - 1))
+    else:
+        stagger = BT_STAGGER
     n = int(entrance_secs * FPS)
     for f in range(n):
         t = f / FPS
         img = Image.new("RGBA", (W, H), BLACK)
         for i, (word, bx, by) in enumerate(boxes):
             img = _blur_in_text(img, (bx, by), word, font, t,
-                                BT_BASE_DELAY + i * BT_STAGGER)
+                                base + i * stagger)
         img.convert("RGB").save(out_dir / f"f_{f:04d}.png")
     return n
 
