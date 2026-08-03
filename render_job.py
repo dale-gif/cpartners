@@ -115,8 +115,13 @@ CLAUDE_SYSTEM = (
     "hook (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', 'STOP GUESSING', 'THEY WON\\'T "
     "PAY'). Use the real words/idea from that segment — do NOT repeat a hook. "
     "Each holds 7-9s (never less than 7). Break into 1-3 lines, Rule of 3 (a "
-    "single killer word alone is fine). Style is assigned automatically, so "
-    "you do not need to set it — just give great hook text at good timestamps.\n"
+    "single killer word alone is fine).\n"
+    "  * PEAK HOOKS: mark ONLY the 1-3 single most scroll-stopping lines in the "
+    "WHOLE video with \"peak\":true — the gut-punch line, the killer number, the "
+    "moment that makes someone stop scrolling. These few get the dramatic black "
+    "full-frame takeover; pick the VERY BEST words, nothing weaker. Every other "
+    "hook is a white side overlay. Be stingy — fewer, better. Do NOT set any "
+    "other style field; it is assigned automatically.\n"
     "  * NEVER place a hook so its window (timestamp .. timestamp+hold) "
     "overlaps an infographic's window. Hooks and infographics must never share "
     "the screen — leave a clean gap around every infographic.\n\n"
@@ -133,7 +138,7 @@ CLAUDE_SYSTEM = (
     "\"text_overlays\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
     "\"lines\":[\"LINE 1\",\"LINE 2\",\"LINE 3\"],"
-    "\"style\":\"black-gradient|big-text|title\"}"
+    "\"peak\":<true for ONLY the 1-3 very best hooks; omit otherwise>}"
     "]}"
 )
 
@@ -157,6 +162,10 @@ OVERLAY_EVERY_SECONDS = 30.0
 MIN_OVERLAY_HOLD = 7.0
 # No overlay may sit within this many seconds of an infographic block.
 OVERLAY_IG_BUFFER = 1.5
+# The black full-frame takeover is RARE — reserved for the very best "peak"
+# hooks only, capped and spaced far apart so it stays a special moment.
+MAX_BLACK_HOOKS = 3
+BLACK_MIN_GAP = 90.0
 
 
 def detect_format(duration: float) -> tuple[str, int, int]:
@@ -252,8 +261,9 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         f"  * A hook's window (timestamp..timestamp+hold) MUST NOT overlap any "
         f"infographic's window. Keep hooks and infographics on separate "
         f"moments with a clean gap — they must never share the screen.\n"
-        f"  * Each text overlay holds 7-9s (NEVER less than 7). Do NOT set "
-        f"style; it is assigned automatically.\n"
+        f"  * Each text overlay holds 7-9s (NEVER less than 7). Mark ONLY the "
+        f"1-3 single best scroll-stopping lines with \"peak\":true (they get "
+        f"the rare black takeover); do not set any style field.\n"
         f"  * Space the {infographic_count} infographics evenly across "
         f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s, well clear of each other.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
@@ -338,14 +348,30 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
             continue
         kept_ov.append(ov)
         last_end = e
-    for i, ov in enumerate(kept_ov):
-        ov["style"] = "big-text" if i % 2 == 0 else "black-gradient"
+    # Style assignment: the black full-frame takeover ('big-text') is RARE and
+    # reserved for the planner's very best "peak" hooks — the single most
+    # scroll-stopping lines — spaced well apart. Everything else is the white
+    # transparent side overlay. If the planner marked none, promote the opening
+    # hook so the video still opens on a black impact beat.
+    last_black = -1e9
+    n_black = 0
+    for ov in kept_ov:
+        s = float(ov.get("timestamp", 0))
+        if (ov.get("peak") and n_black < MAX_BLACK_HOOKS
+                and s - last_black >= BLACK_MIN_GAP):
+            ov["style"] = "big-text"
+            last_black = s
+            n_black += 1
+        else:
+            ov["style"] = "black-gradient"
+    if n_black == 0 and kept_ov:
+        kept_ov[0]["style"] = "big-text"
+        n_black = 1
     if dropped_ov:
         log(f"de-collide: dropped {dropped_ov} overlay(s) overlapping an "
             f"infographic or another overlay")
     plan["text_overlays"] = kept_ov
-    n_black = sum(1 for o in kept_ov if o["style"] == "big-text")
-    log(f"overlays: {len(kept_ov)} total — {n_black} black full-frame, "
+    log(f"overlays: {len(kept_ov)} total — {n_black} rare black takeover(s), "
         f"{len(kept_ov) - n_black} white side; all clear of infographics")
 
     hook_count = sum(
