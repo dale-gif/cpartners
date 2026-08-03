@@ -70,9 +70,11 @@ BT_BASE_DELAY, BT_STAGGER = 0.15, 0.28
 SAFE_TOP, SAFE_BOTTOM = 70, 806
 SAFE_CENTER = (SAFE_TOP + SAFE_BOTTOM) // 2
 SAFE_H = SAFE_BOTTOM - SAFE_TOP
-# Big-text is centered around this Y (middle of the visible frame) for balance;
-# tall multi-line hooks are clamped so they never cross SAFE_BOTTOM.
-BT_VCENTER = 520
+# Big-text is centered in the SAFE CONTENT AREA (the zone above the caption
+# band), so the block reads as optically centered on-frame with balanced space
+# above and below — matching the approved reference. Tall multi-line hooks are
+# clamped so they never cross SAFE_BOTTOM.
+BT_VCENTER = SAFE_CENTER
 
 
 def _bt_layout(words, font, draw, max_w):
