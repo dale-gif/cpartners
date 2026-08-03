@@ -108,28 +108,18 @@ CLAUDE_SYSTEM = (
     "(\"DM US TODAY\" + disclaimer). NEVER place an infographic or text "
     "overlay whose (timestamp + hold) crosses into the last 15s. Keep every "
     "moment fully clear of that zone.\n\n"
-    "HOOK CADENCE (HARD): a text overlay MUST land in EVERY consecutive ~20s "
-    "window of the video — 0-20s, 20-40s, 40-60s, and so on, right up to the "
-    "outro. In each window, pick the single most scroll-stopping thing Stacey "
-    "actually says in that stretch and distil it to a punchy 1-3 word hook "
-    "(e.g. 'DON\\'T WAIT', 'IT COSTS YOU', 'STOP GUESSING', 'THEY WON\\'T PAY'). "
-    "Use the real words/idea from that segment — do NOT repeat the same hook. "
-    "Each overlay holds 7-9s (never less than 7). Break into 1-3 lines using "
-    "the Rule of 3 (a single killer word on its own is fine).\n"
-    "  * The FIRST overlay (0-20s opening hook) MUST use style 'big-text' — "
-    "the massive full-frame black takeover, for maximum cold-open impact.\n"
-    "  * EVERY OTHER hook uses style 'black-gradient' — the transparent side "
-    "overlay that keeps Stacey visible frame-right while the hook animates in "
-    "frame-left. This is the recurring look; use it for all body hooks.\n\n"
-    "TITLE CARD (HARD): exactly ONE text overlay MUST use style 'title'. It is "
-    "a section/chapter title that introduces the main topic — a SHORT 2-4 word "
-    "CAPS phrase (MAX 4 words, never more) naming what this segment is about "
-    "(e.g. 'THE PHOENIX TRAP', 'HOW IT HAPPENS', 'WHAT YOU CAN DO'). Keep it "
-    "short: it sits on the LEFT of the frame in two rows and must stay clear of "
-    "the presenter — long phrases get shrunk and look weak. Place it at a "
-    "natural section start — right after the hook (roughly 20-40s in) or at the "
-    "first clear topic transition. This is separate from and in addition to the "
-    "hook; the hook is 'big-text', the title card is 'title'.\n\n"
+    "HOOK CADENCE (HARD): a text overlay MUST land roughly every ~30 seconds "
+    "across the whole video — near 30s, 60s, 90s, 120s, and so on, up to the "
+    "outro. In each ~30s window pick the single most scroll-stopping thing "
+    "Stacey actually says in that stretch and distil it to a punchy 1-3 word "
+    "hook (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', 'STOP GUESSING', 'THEY WON\\'T "
+    "PAY'). Use the real words/idea from that segment — do NOT repeat a hook. "
+    "Each holds 7-9s (never less than 7). Break into 1-3 lines, Rule of 3 (a "
+    "single killer word alone is fine). Style is assigned automatically, so "
+    "you do not need to set it — just give great hook text at good timestamps.\n"
+    "  * NEVER place a hook so its window (timestamp .. timestamp+hold) "
+    "overlaps an infographic's window. Hooks and infographics must never share "
+    "the screen — leave a clean gap around every infographic.\n\n"
     "Return ONLY a single JSON object matching this schema and nothing else:\n"
     "{\"infographics\":["
     "{\"timestamp\":<seconds>,\"hold\":<seconds>,"
@@ -159,10 +149,14 @@ OUTRO_RESERVED_SECONDS = 15.0
 # the first N seconds, capturing the sentiment peak of the opening beat.
 HOOK_WINDOW_SECONDS = 20.0
 
-# Larry-approved cadence: a punchy hook overlay lands in EVERY ~20s window of
-# the script, each held long enough to read and land as a beat.
-OVERLAY_EVERY_SECONDS = 20.0
+# Approved cadence: a punchy hook lands every ~30s. Hooks ALTERNATE style so
+# the black full-frame takeover ('big-text') lands ~every 60s and the white
+# transparent side overlay ('black-gradient') fills the ~30s in between —
+# balanced, and NEVER overlapping an infographic (enforced in _decollide).
+OVERLAY_EVERY_SECONDS = 30.0
 MIN_OVERLAY_HOLD = 7.0
+# No overlay may sit within this many seconds of an infographic block.
+OVERLAY_IG_BUFFER = 1.5
 
 
 def detect_format(duration: float) -> tuple[str, int, int]:
@@ -252,16 +246,16 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         f"HARD CONSTRAINTS:\n"
         f"  * Every (timestamp + hold) MUST be <= {safe_end:.1f}. No item may "
         f"cross into the outro zone.\n"
-        f"  * Place exactly {overlay_count} text overlays — ONE in each "
-        f"consecutive ~20s window (0-20, 20-40, 40-60, ...) up to "
-        f"{safe_end:.1f}s. Each captures the punchiest 1-3 word hook Stacey "
-        f"says in THAT window; do not repeat hooks.\n"
-        f"  * The first overlay (timestamp < {HOOK_WINDOW_SECONDS:.0f}) uses "
-        f"style 'big-text'; every other overlay uses style 'black-gradient'. "
-        f"Include exactly one 'title' section card among them.\n"
-        f"  * Each text overlay holds 7-9s (NEVER less than 7).\n"
-        f"  * Distribute the {infographic_count} infographics evenly across "
-        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s, spaced apart.\n\n"
+        f"  * Place exactly {overlay_count} text overlays — ONE roughly every "
+        f"~30s (near 30, 60, 90, ...) up to {safe_end:.1f}s. Each captures the "
+        f"punchiest 1-3 word hook Stacey says in THAT window; do not repeat.\n"
+        f"  * A hook's window (timestamp..timestamp+hold) MUST NOT overlap any "
+        f"infographic's window. Keep hooks and infographics on separate "
+        f"moments with a clean gap — they must never share the screen.\n"
+        f"  * Each text overlay holds 7-9s (NEVER less than 7). Do NOT set "
+        f"style; it is assigned automatically.\n"
+        f"  * Space the {infographic_count} infographics evenly across "
+        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s, well clear of each other.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
     )
     r = requests.post(
@@ -320,6 +314,40 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays",
                                     MIN_OVERLAY_HOLD, min_hold=MIN_OVERLAY_HOLD)
 
+    # HARD de-collision: a hook must NEVER overlap an infographic block or
+    # another hook. Drop any that would (we have plenty of hooks), then
+    # ALTERNATE styles so the black full-frame takeover ('big-text') lands
+    # ~every 60s and the white transparent side overlay ('black-gradient')
+    # fills the ~30s gaps — balanced, and always clear of the graphics.
+    ig_windows = sorted(
+        (float(g.get("timestamp", 0)),
+         float(g.get("timestamp", 0)) + float(g.get("hold", INFOGRAPHIC_HOLD)))
+        for g in plan["infographics"]
+    )
+
+    def _hits_ig(s: float, e: float) -> bool:
+        return any(s < be + OVERLAY_IG_BUFFER and e > bs - OVERLAY_IG_BUFFER
+                   for bs, be in ig_windows)
+
+    kept_ov, last_end, dropped_ov = [], -1e9, 0
+    for ov in sorted(plan["text_overlays"], key=lambda o: float(o.get("timestamp", 0))):
+        s = float(ov.get("timestamp", 0))
+        e = s + float(ov.get("hold", MIN_OVERLAY_HOLD))
+        if _hits_ig(s, e) or s < last_end + 0.5:
+            dropped_ov += 1
+            continue
+        kept_ov.append(ov)
+        last_end = e
+    for i, ov in enumerate(kept_ov):
+        ov["style"] = "big-text" if i % 2 == 0 else "black-gradient"
+    if dropped_ov:
+        log(f"de-collide: dropped {dropped_ov} overlay(s) overlapping an "
+            f"infographic or another overlay")
+    plan["text_overlays"] = kept_ov
+    n_black = sum(1 for o in kept_ov if o["style"] == "big-text")
+    log(f"overlays: {len(kept_ov)} total — {n_black} black full-frame, "
+        f"{len(kept_ov) - n_black} white side; all clear of infographics")
+
     hook_count = sum(
         1 for ov in plan["text_overlays"]
         if float(ov.get("timestamp", 999)) < HOOK_WINDOW_SECONDS
@@ -327,18 +355,6 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     if hook_count == 0:
         log(f"WARNING: no hook overlay in first {HOOK_WINDOW_SECONDS:.0f}s "
             f"(Claude should have placed one — check prompt output)")
-    elif hook_count > 1:
-        log(f"note: {hook_count} overlays landed in the hook window "
-            f"(only 1 required, but fine)")
-
-    title_count = sum(
-        1 for ov in plan["text_overlays"] if ov.get("style") == "title"
-    )
-    if title_count == 0:
-        log("WARNING: no 'title' style overlay (Claude must include exactly one "
-            "section title card — check prompt output)")
-    else:
-        log(f"title card(s): {title_count}")
     return plan
 
 
