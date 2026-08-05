@@ -80,26 +80,57 @@ def _draw_letterbox(img: Image.Image) -> None:
     img.alpha_composite(top_bar, (0, 0))
 
 
+def _wrap_words(words, font, draw, max_w):
+    """Greedy word-wrap: pack words into lines no wider than max_w px."""
+    lines, cur = [], []
+    for w in words:
+        trial = " ".join(cur + [w])
+        if cur and draw.textbbox((0, 0), trial, font=font)[2] > max_w:
+            lines.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        lines.append(cur)
+    return [" ".join(l) for l in lines]
+
+
 def _render_black_gradient(lines: list[str], font_dir: Path, img: Image.Image) -> None:
-    """Original black-gradient style: letterbox + frame-left text."""
+    """On-video hook style: letterbox + frame-left text.
+
+    The incoming ``lines`` are treated as loose text and re-wrapped here so a
+    long hook can never spill past the frame-left safe zone (TEXT_MAX_W). We
+    wrap to <=3 lines (Rule of 3) and shrink-to-fit on BOTH width and height,
+    with a guaranteed final fit check. Previously this only shrank the font and
+    assumed the caller pre-split into short lines, so a single long line ran
+    straight off the right of frame.
+    """
     _draw_letterbox(img)
     draw = ImageDraw.Draw(img)
-    padded = (list(lines) + ["", "", ""])[:3]
+
+    words = " ".join(l for l in lines if l).upper().split()
+    if not words:
+        return
 
     size = FONT_SIZE
-    font = _load_font(font_dir, size)
+    wrapped = _wrap_words(words, _load_font(font_dir, size), draw, TEXT_MAX_W)
     while size > 40:
-        widths = [draw.textbbox((0, 0), line, font=font)[2] for line in padded if line]
-        if not widths or max(widths) <= TEXT_MAX_W:
+        font = _load_font(font_dir, size)
+        wrapped = _wrap_words(words, font, draw, TEXT_MAX_W)
+        widest = max(draw.textbbox((0, 0), ln, font=font)[2] for ln in wrapped)
+        total_h = len(wrapped) * size + LINE_GAP * (len(wrapped) - 1)
+        if (widest <= TEXT_MAX_W and len(wrapped) <= 3
+                and TEXT_Y + total_h <= CAPTION_ZONE_Y):
             break
         size -= 4
-        font = _load_font(font_dir, size)
+
+    font = _load_font(font_dir, size)
+    wrapped = _wrap_words(words, font, draw, TEXT_MAX_W)[:3]
 
     y = TEXT_Y
-    for line in padded:
+    for line in wrapped:
         draw.text((TEXT_X, y), line, font=font, fill=WHITE)
         y += size + LINE_GAP
-
 
 def _render_big_text(lines: list[str], font_dir: Path, img: Image.Image) -> None:
     """Big Text style: opaque black, massive centered text.
