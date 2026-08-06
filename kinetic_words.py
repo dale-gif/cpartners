@@ -21,6 +21,8 @@ THREE STYLES (Larry-approved):
    - Thin vertical white line on left of text
    - Large bold white text, LEFT-ALIGNED, vertically centered
    - Used for chapter/section title cards
+   - Capped to TITLE_MAX_WORDS on a single line so it stays PUNCHY
+     (e.g. "GOOD LUCK", "TIME TO RECONSIDER") — never a full sentence
 """
 from __future__ import annotations
 
@@ -56,6 +58,9 @@ TITLE_LINE_X = 80
 TITLE_TEXT_X = 110
 TITLE_MAX_W = 1400
 TITLE_LINE_GAP = 15
+TITLE_MAX_WORDS = 4  # Larry rule: title cards stay PUNCHY (e.g. "GOOD LUCK"),
+                    # never a full sentence. Anything longer belongs in
+                    # black-gradient or big-text.
 
 _DEJAVU_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -201,13 +206,21 @@ def _render_title(lines: list[str], font_dir: Path, img: Image.Image) -> None:
 
     Thin vertical white line on the left, large bold text beside it,
     vertically centered.
+
+    Titles are PUNCHY by design — a card, not a paragraph. We flatten the
+    incoming lines into a single word list and cap at TITLE_MAX_WORDS so the
+    card never turns into a sentence that visually competes with the OpusClip
+    caption band. If the caller passes more words, we take the first N and
+    drop the rest — the planner is expected to send a short label.
     """
     draw = ImageDraw.Draw(img)
 
-    display_lines = [line.strip().upper() for line in lines if line.strip()]
-    if not display_lines:
+    all_words = " ".join(l.strip().upper() for l in lines if l.strip()).split()
+    if not all_words:
         return
-    display_lines = display_lines[:3]
+    # Punchy cap: one line, at most TITLE_MAX_WORDS words.
+    all_words = all_words[:TITLE_MAX_WORDS]
+    display_lines = [" ".join(all_words)]
 
     size = TITLE_FONT_SIZE
     font = _load_font(font_dir, size)
