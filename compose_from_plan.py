@@ -1,9 +1,10 @@
 """ffmpeg composite: burn infographic + text-overlay PNGs onto the base video.
 
-Timing rules (locked):
-- Infographics hold 7 seconds by default (6-10 allowed).
-- Text overlays hold 5 seconds by default.
-- All overlays fade in/out over 0.5 seconds; never slide.
+Timing rules (locked — Larry edit notes, Aug 2026):
+- Infographics hold 5-8 seconds (punchy; default 7). Never linger on one card.
+- Text overlays hold <=3 seconds (default 3).
+- All overlays fade in/out over 0.5s (~12 frames @25fps, inside Larry's 10-15
+  frame range); never slide.
 
 Output is 1080p (1920x1080). PNGs are authored at native 1920x1080.
 
@@ -18,9 +19,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-INFOGRAPHIC_HOLD = 20.0  # default cards stay long enough for a full explanation
-OVERLAY_HOLD = 5.0
-FADE = 0.5
+INFOGRAPHIC_HOLD = 7.0   # Larry: infographics 5-8s, punchy — do NOT hold for the whole explanation
+OVERLAY_HOLD = 3.0       # Larry: on-screen text <=3s
+FADE = 0.5               # alpha fade in/out ~12 frames @25fps (Larry: 10-15 frame transitions)
 
 TARGET_W = 1920
 TARGET_H = 1080

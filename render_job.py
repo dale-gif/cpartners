@@ -30,9 +30,12 @@ from animations import render_infographic_clip, render_overlay_clip
 
 # How long each cutaway's entrance animation runs before it holds on the final
 # frame. The clip's total on-screen time is `hold`; entrance is the first
-# ENTRANCE_SECS of that.
+# ENTRANCE_SECS of that. Infographic entrance stays at 3.0s so all 3 staggered
+# cards fully resolve before the freeze (2.0s cuts the 3rd card off mid-reveal);
+# it still fits inside the new 5-8s holds. Overlay entrance trimmed to 1.0s so
+# the shorter <=3s text holds still leave readable freeze time.
 INFOGRAPHIC_ENTRANCE = 3.0
-OVERLAY_ENTRANCE = 1.6
+OVERLAY_ENTRANCE = 1.0
 
 OPUS_URL = os.environ["OPUS_CLIP_URL"]
 VIDEO_ID = os.environ["VIDEO_ID"]
@@ -46,9 +49,9 @@ CLAUDE_SYSTEM = (
     "verbose_json transcript and emit a JSON plan that chooses infographic "
     "moments and text overlay moments.\n\n"
     "GLOBAL STYLE (Larry-locked): pure black and white; ALL CAPS everywhere; "
-    "punchy phrasing; hold 6-10s; appear (fade/scale), never slide; no kickers, "
-    "no page counters, no type labels, no emoji. Keep it minimal. Focus on "
-    "clarity. Clean. Professional. Reusable.\n\n"
+    "punchy phrasing; infographics hold 5-8s, text overlays hold <=3s; appear "
+    "(fade/scale), never slide; no kickers, no page counters, no type labels, "
+    "no emoji. Keep it minimal. Focus on clarity. Clean. Professional. Reusable.\n\n"
     "RULE OF 3 (LOCKED): every infographic contains EXACTLY 3 cards. Never 2, "
     "never 4, never 5. If Stacey lists more than 3 things, pick the 3 most "
     "important. If she lists fewer, expand to 3 supporting beats. The overall "
@@ -58,11 +61,10 @@ CLAUDE_SYSTEM = (
     "'PATHWAYS TO GET PAID', 'WHAT GOOD LOOKS LIKE').\n\n"
     "INFOGRAPHIC SCHEMA (per moment):\n"
     "  timestamp      : seconds — when Stacey STARTS explaining this concept.\n"
-    "  hold           : seconds — how long the card stays up. Match how long "
-    "                  Stacey spends on this concept. Typical: 15-30 seconds "
-    "                  for a multi-part explanation, up to 40s if she goes deep. "
-    "                  The card should stay on-screen for the WHOLE discussion, "
-    "                  not just the moment she introduces it.\n"
+    "  hold           : seconds — 5-8s depending on how much the card carries "
+    "                  (a light 3-card beat ~5s; a dense one up to 8s). PUNCHY: "
+    "                  the card makes its point and cuts back to Stacey — it does "
+    "                  NOT linger for the whole explanation.\n"
     "  overall_title  : 1-3 words CAPS, <= 22 chars. Example: WHY THEY DON'T PAY\n"
     "  subtitle       : short CAPS phrase, <= 40 chars. Example: IT IS A CHOICE, NOT AN ACCIDENT\n"
     "  template       : PICK ONE — see TEMPLATES below\n"
@@ -90,8 +92,8 @@ CLAUDE_SYSTEM = (
     "'THE RELATIONSHIP IS DAMAGED YOU FEEL IT' becomes "
     "['RELATIONSHIP', 'ALREADY DAMAGED', 'YOU FEEL IT']. "
     "  timestamp : seconds — when the line lands.\n"
-    "  hold      : seconds — how long the text stays up. 7-9s (MINIMUM 7). "
-    "              Long enough to read and land as a beat.\n"
+    "  hold      : seconds — how long the text stays up. ~3s (MAXIMUM 3). "
+    "              Punchy: long enough to read a 1-3 word hook, then cut.\n"
     "TEXT OVERLAY STYLES — pick the best fit:\n"
     "  * 'black-gradient' (DEFAULT) — transparent letterbox overlay. Stacey stays "
     "visible frame-right. Text is bold white, frame-left. Use for most overlays.\n"
@@ -108,14 +110,20 @@ CLAUDE_SYSTEM = (
     "outro. NEVER place an infographic or text overlay whose (timestamp + "
     "hold) crosses into the last 20s. Keep every moment fully clear of that "
     "zone.\n\n"
-    "HOOK CADENCE (HARD): a text overlay MUST land roughly every ~30 seconds "
-    "across the whole video — near 30s, 60s, 90s, 120s, and so on, up to the "
-    "outro. In each ~30s window pick the single most scroll-stopping thing "
-    "Stacey actually says in that stretch and distil it to a punchy 1-3 word "
-    "hook (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', 'STOP GUESSING', 'THEY WON\\'T "
-    "PAY'). Use the real words/idea from that segment — do NOT repeat a hook. "
-    "Each holds 7-9s (never less than 7). Break into 1-3 lines, Rule of 3 (a "
-    "single killer word alone is fine).\n"
+    "NO STATIC SCREEN (HARD — Larry): the plain talking head must NEVER be "
+    "alone on screen for more than ~10 seconds. Space infographics and text "
+    "overlays so a visual element (card or hook) lands often enough to break up "
+    "every stretch of bare avatar footage — no gap larger than ~10s between the "
+    "end of one element and the start of the next (outside the reserved outro). "
+    "Lean toward MORE supporting infographics wherever Stacey explains a "
+    "process, list, timeline, comparison or statistic.\n\n"
+    "HOOK CADENCE (HARD): a text overlay MUST land roughly every ~12 seconds "
+    "across the whole video, up to the outro. In each ~12s window pick the "
+    "single most scroll-stopping thing Stacey actually says in that stretch and "
+    "distil it to a punchy 1-3 word hook (e.g. 'DON\\'T WAIT', 'IT COSTS YOU', "
+    "'STOP GUESSING', 'THEY WON\\'T PAY'). Use the real words/idea from that "
+    "segment — do NOT repeat a hook. Each holds ~3s (max 3). Break into 1-3 "
+    "lines, Rule of 3 (a single killer word alone is fine).\n"
     "  * PEAK HOOKS: mark ONLY the 1-3 single most scroll-stopping lines in the "
     "WHOLE video with \"peak\":true — the gut-punch line, the killer number, the "
     "moment that makes someone stop scrolling. These few get the dramatic black "
@@ -155,12 +163,25 @@ OUTRO_RESERVED_SECONDS = 20.0
 # the first N seconds, capturing the sentiment peak of the opening beat.
 HOOK_WINDOW_SECONDS = 20.0
 
-# Approved cadence: a punchy hook lands every ~30s. Hooks ALTERNATE style so
-# the black full-frame takeover ('big-text') lands ~every 60s and the white
-# transparent side overlay ('black-gradient') fills the ~30s in between —
-# balanced, and NEVER overlapping an infographic (enforced in _decollide).
-OVERLAY_EVERY_SECONDS = 30.0
-MIN_OVERLAY_HOLD = 7.0
+# ── PACING (Larry edit notes, Aug 2026) ────────────────────────────────────
+# Tune these to trade a "busier" vs "calmer" edit. Larry's brief: ~7 visual
+# elements/min, and NEVER leave the plain talking head static for >8-10s.
+#
+# A punchy hook lands every ~12s; infographics are interspersed roughly every
+# ~90s. Combined they keep a visual element on screen often enough that no
+# bare-avatar gap exceeds MAX_STATIC_GAP. Hooks still ALTERNATE style so the
+# rare black full-frame takeover ('big-text') stays special and the white side
+# overlay ('black-gradient') carries the rest — never overlapping an infographic.
+OVERLAY_EVERY_SECONDS = 12.0   # was 30 — Larry: kill the long static gaps
+MIN_OVERLAY_HOLD = 2.5         # Larry: on-screen text <=3s (2.5-3.0)
+MAX_OVERLAY_HOLD = 3.0
+# Infographics: hold 5-8s (punchy) and appear more often to support the VO.
+INFOGRAPHIC_HOLD_MIN = 5.0
+INFOGRAPHIC_HOLD_MAX = 8.0
+IG_EVERY_SECONDS = 90.0        # ~1 supporting infographic per ~90s of runtime
+MAX_INFOGRAPHICS = 8           # cap so the planner still finds strong beats
+# Hard ceiling on bare-avatar time. Larry: no static screen for >8-10s.
+MAX_STATIC_GAP = 10.0
 # No overlay may sit within this many seconds of an infographic block.
 OVERLAY_IG_BUFFER = 1.5
 # The black full-frame takeover is RARE — reserved for the very best "peak"
@@ -172,15 +193,18 @@ BLACK_MIN_GAP = 90.0
 def detect_format(duration: float) -> tuple[str, int, int]:
     """Return (format_label, infographic_count, text_overlay_count).
 
-    Text overlays follow a fixed cadence: ONE hook per ~20s of usable runtime
-    (everything before the outro), so viewers get a fresh on-screen hook every
-    20 seconds. Infographics stay at 2 (MF) / 3 (LF).
+    Both counts scale with usable runtime (everything before the outro) so the
+    edit stays dense enough to satisfy Larry's "no static screen >8-10s" rule:
+      * one hook overlay per OVERLAY_EVERY_SECONDS (~12s)
+      * one supporting infographic per IG_EVERY_SECONDS (~90s), capped
+    MF keeps a floor of 2 infographics, LF a floor of 3.
     """
     usable = max(0.0, duration - OUTRO_RESERVED_SECONDS)
     overlay_count = max(3, round(usable / OVERLAY_EVERY_SECONDS))
+    ig_by_runtime = round(usable / IG_EVERY_SECONDS)
     if duration < LF_MIN_SECONDS:
-        return "MF", 2, overlay_count
-    return "LF", 3, overlay_count
+        return "MF", min(MAX_INFOGRAPHICS, max(2, ig_by_runtime)), overlay_count
+    return "LF", min(MAX_INFOGRAPHICS, max(3, ig_by_runtime)), overlay_count
 
 
 def log(msg: str) -> None:
@@ -257,16 +281,23 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         f"  * Every (timestamp + hold) MUST be <= {safe_end:.1f}. No item may "
         f"cross into the outro zone.\n"
         f"  * Place exactly {overlay_count} text overlays — ONE roughly every "
-        f"~30s (near 30, 60, 90, ...) up to {safe_end:.1f}s. Each captures the "
+        f"~{OVERLAY_EVERY_SECONDS:.0f}s up to {safe_end:.1f}s. Each captures the "
         f"punchiest 1-3 word hook Stacey says in THAT window; do not repeat.\n"
+        f"  * NO STATIC SCREEN: never leave the plain talking head alone for "
+        f">{MAX_STATIC_GAP:.0f}s. Space overlays and infographics so a visual "
+        f"element lands often enough that no bare-avatar gap exceeds "
+        f"{MAX_STATIC_GAP:.0f}s.\n"
         f"  * A hook's window (timestamp..timestamp+hold) MUST NOT overlap any "
         f"infographic's window. Keep hooks and infographics on separate "
         f"moments with a clean gap — they must never share the screen.\n"
-        f"  * Each text overlay holds 7-9s (NEVER less than 7). Mark ONLY the "
+        f"  * Each text overlay holds ~3s (MAX 3). Mark ONLY the "
         f"1-3 single best scroll-stopping lines with \"peak\":true (they get "
         f"the rare black takeover); do not set any style field.\n"
-        f"  * Space the {infographic_count} infographics evenly across "
-        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s, well clear of each other.\n\n"
+        f"  * Each infographic holds 5-8s (punchy — never linger).\n"
+        f"  * Space the {infographic_count} infographics across "
+        f"{HOOK_WINDOW_SECONDS:.0f}..{safe_end:.1f}s to support the moments "
+        f"where Stacey explains a process, list, timeline, comparison or stat, "
+        f"well clear of each other.\n\n"
         f"TRANSCRIPT_JSON:\n{json.dumps(transcript)}"
     )
     r = requests.post(
@@ -299,11 +330,12 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     safe_end = max(0.0, duration - OUTRO_RESERVED_SECONDS)
 
     def _guard(items: list, kind: str, default_hold: float,
-               min_hold: float = 0.0) -> list:
+               min_hold: float = 0.0, max_hold: float = 1e9) -> list:
         kept, dropped, clipped = [], [], []
         for it in items or []:
             ts = float(it.get("timestamp", -1))
-            hold = max(float(it.get("hold", default_hold)), min_hold)
+            # Clamp the planned hold into Larry's allowed band first.
+            hold = min(max(float(it.get("hold", default_hold)), min_hold), max_hold)
             it["hold"] = hold
             if ts < 0 or ts >= safe_end:
                 dropped.append(ts)
@@ -321,9 +353,13 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
             log(f"clipped {len(clipped)} {kind} to avoid outro: {clipped}")
         return kept
 
-    plan["infographics"] = _guard(plan.get("infographics"), "infographics", INFOGRAPHIC_HOLD)
+    plan["infographics"] = _guard(plan.get("infographics"), "infographics",
+                                   INFOGRAPHIC_HOLD,
+                                   min_hold=INFOGRAPHIC_HOLD_MIN,
+                                   max_hold=INFOGRAPHIC_HOLD_MAX)
     plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays",
-                                    MIN_OVERLAY_HOLD, min_hold=MIN_OVERLAY_HOLD)
+                                    OVERLAY_HOLD, min_hold=MIN_OVERLAY_HOLD,
+                                    max_hold=MAX_OVERLAY_HOLD)
 
     # HARD de-collision: a hook must NEVER overlap an infographic block or
     # another hook. Drop any that would (we have plenty of hooks), then
@@ -382,6 +418,28 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     if hook_count == 0:
         log(f"WARNING: no hook overlay in first {HOOK_WINDOW_SECONDS:.0f}s "
             f"(Claude should have placed one — check prompt output)")
+
+    # STATIC-GAP AUDIT (Larry: no bare-avatar screen >~10s). We don't silently
+    # inject filler — the planner is instructed to prevent this — but we log any
+    # residual gap so a thin plan shows up in the run output instead of hiding.
+    windows = sorted(
+        (float(x.get("timestamp", 0)),
+         float(x.get("timestamp", 0)) + float(x.get("hold", 0)))
+        for x in (plan.get("infographics") or []) + (plan.get("text_overlays") or [])
+    )
+    gaps, cursor = [], 0.0
+    for s, e in windows:
+        if s - cursor > MAX_STATIC_GAP:
+            gaps.append((round(cursor, 1), round(s, 1), round(s - cursor, 1)))
+        cursor = max(cursor, e)
+    if safe_end - cursor > MAX_STATIC_GAP:
+        gaps.append((round(cursor, 1), round(safe_end, 1), round(safe_end - cursor, 1)))
+    if gaps:
+        log(f"STATIC-GAP WARNING: {len(gaps)} bare-avatar gap(s) > "
+            f"{MAX_STATIC_GAP:.0f}s remain (start,end,len): {gaps}")
+    else:
+        log(f"static-gap check: OK — no bare-avatar gap > {MAX_STATIC_GAP:.0f}s")
+
     return plan
 
 
