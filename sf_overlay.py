@@ -37,10 +37,11 @@ MAX_LINES = 2           # NEVER stack more than two lines
 
 # ---- vertical safe zone ----
 # SAFE_BOTTOM protects the OpusClip DANGER ZONE (subtitle track + CTA +
-# progress bar) that lives in the bottom ~28% of the exported canvas.
+# progress bar) that lives in the bottom ~18% of the exported canvas
+# (Dale-verified from the OpusClip preview: red line at ~82% of frame).
 # Text (and rule bars) get clamped up so nothing crosses y = H - SAFE_BOTTOM.
 SAFE_TOP = 80
-SAFE_BOTTOM = 540       # danger line at y = 1380
+SAFE_BOTTOM = 346       # danger line at y = 1574 (82% of 1920)
 
 # ---- vertical anchor per placement (Larry-locked TARGETS) ----
 # `bottom` and (when block+bars are tall) `lower_third` are pulled up by the
