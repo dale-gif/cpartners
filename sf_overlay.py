@@ -26,10 +26,12 @@ W, H = 1080, 1920
 
 WHITE = (255, 255, 255, 255)
 
-# ---- text sizing (Larry-approved reference: 1-3 word hooks, near-full-width) ----
-MAX_SIZE = 220          # matches Larry's reference: huge, scroll-stopping
-MIN_SIZE = 108          # floor for single-line fits
-WRAP_MIN_SIZE = 84      # deeper floor allowed only when forced to wrap
+# ---- text sizing (Larry-approved reference: Anton, 1-3 word hooks, huge) ----
+# Anton is a condensed heavy sans, so at the same visual weight it fits more
+# text per line than Inter Black — hence the bumped MAX_SIZE.
+MAX_SIZE = 280          # matches Larry's reference: huge, scroll-stopping
+MIN_SIZE = 132          # floor for single-line fits
+WRAP_MIN_SIZE = 96      # deeper floor allowed only when forced to wrap
 SIDE_MARGIN = 48        # tight — Larry's text runs nearly edge-to-edge
 MAX_W = W - 2 * SIDE_MARGIN
 LINE_GAP = 12
@@ -70,7 +72,10 @@ FACE_SAFE_ROTATION = ("top", "lower_third", "bottom")
 
 
 def _load_font(font_dir: Path, size: int) -> ImageFont.FreeTypeFont:
-    for name in ("Inter-Black.ttf", "Inter-ExtraBold.ttf"):
+    # Anton (Larry-approved reference) first — heavy condensed sans that reads
+    # as scroll-stopping headline weight. Falls back to Inter Black if Anton
+    # isn't bundled with the render image for some reason.
+    for name in ("Anton-Regular.ttf", "Inter-Black.ttf", "Inter-ExtraBold.ttf"):
         p = font_dir / name
         if p.exists():
             return ImageFont.truetype(str(p), size)
