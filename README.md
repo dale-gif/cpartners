@@ -92,3 +92,35 @@ Enforced in `graphic_cards.py` and `kinetic_words.py`:
 - Stacey is frame-right; overlays land frame-left; clear of the bottom caption band.
 
 If Larry changes his mind, edit the constants at the top of each file — do not scatter magic numbers.
+
+## SF portrait on-screen text (9:16) — NEW
+
+Short-form (SF) videos get their own **portrait 1080×1920** on-screen-text pass, separate from the landscape MF/LF path above. It lives in two self-contained modules (`sf_overlay.py`, `sf_render.py`) and only runs when a request opts in — **turning it on cannot change MF/LF output.**
+
+**Trigger:** POST `/render` with `"format": "sf"` (or `"portrait"`). Omit it (or send anything else) and you get the unchanged landscape path.
+
+```json
+{
+  "format": "sf",
+  "opusClipUrl": "https://.../brad_portrait.mp4",
+  "videoId": "CRP-D-...-SC",
+  "plan": {
+    "text_overlays": [
+      { "timestamp": 2,  "lines": ["STILL OWE"],   "placement": "top" },
+      { "timestamp": 9,  "lines": ["THEY DO PAY"],  "punchy": true },
+      { "timestamp": 18, "lines": ["30 DAYS"] },
+      { "timestamp": 40, "lines": ["STILL OWE"],   "placement": "bottom" }
+    ]
+  }
+}
+```
+
+**Placements (Larry-approved):** `top`, `center`, `lower_third` (over/under rule bars), `bottom`. Big Inter Black, white, uppercase, horizontally centered, soft drop shadow.
+
+**Content-aware placement** (`sf_overlay.assign_placements`): lines rotate TOP → LOWER_THIRD → BOTTOM to keep the presenter's face clear; **CENTER is reserved for one short punchy standalone line** (`"punchy": true`, or ≤3 words). Pin any line with an explicit `"placement"`.
+
+**Timing:** each line holds ~2.5s with a **0.5s alpha fade in/out** (never slide) — the same locked transition as MF/LF.
+
+**Tuning:** sizes/positions/bars are constants at the top of `sf_overlay.py`; hold/fade at the top of `sf_render.py`. No scattered magic numbers.
+
+**Preview the placements:** `python sf_overlay.py sf_preview` renders the 4 zones over a mock backdrop to `sf_preview/`.

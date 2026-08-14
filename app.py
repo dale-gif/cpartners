@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from godtier_lf import render_job
+from sf_render import render_job_sf
 
 BASE_DIR = Path(__file__).parent
 WORK_ROOT = Path(os.environ.get("WORK_ROOT", BASE_DIR / "work"))
@@ -62,6 +63,7 @@ class RenderRequest(BaseModel):
     plan: dict = Field(..., description="Claude planner output JSON")
     opusClipUrl: str = Field(..., description="OpusClip MP4 URL to composite onto")
     videoId: str | None = Field(default=None, description="Notion page id (optional)")
+    format: str | None = Field(default=None, description="'sf'/'portrait' -> 9:16 SF on-screen-text path; omit/None -> landscape MF/LF (unchanged)")
 
 
 class WhisperRequest(BaseModel):
@@ -71,13 +73,22 @@ class WhisperRequest(BaseModel):
 def _run(job_id: str, req: RenderRequest) -> None:
     _write_state(job_id, status="running")
     try:
-        out = render_job(
-            job_id=job_id,
-            plan=req.plan,
-            opus_clip_url=req.opusClipUrl,
-            work_root=WORK_ROOT,
-            font_dir=FONT_DIR,
-        )
+        if (req.format or "").lower() in ("sf", "portrait"):
+            out = render_job_sf(
+                job_id=job_id,
+                plan=req.plan,
+                base_video_url=req.opusClipUrl,
+                work_root=WORK_ROOT,
+                font_dir=FONT_DIR,
+            )
+        else:
+            out = render_job(
+                job_id=job_id,
+                plan=req.plan,
+                opus_clip_url=req.opusClipUrl,
+                work_root=WORK_ROOT,
+                font_dir=FONT_DIR,
+            )
         _write_state(job_id, status="done", path=str(out))
     except Exception as e:
         _write_state(
