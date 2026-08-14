@@ -36,15 +36,19 @@ LINE_GAP = 14
 MAX_LINES = 2           # NEVER stack more than two lines
 
 # ---- vertical safe zone (block stays inside these bounds) ----
+# Larry-flagged BLACK DANGER ZONE: bottom ~30% of the frame is reserved for
+# OpusClip's subtitle track + CTA + progress bar. Our OSTs must stay ABOVE
+# the danger line (y ~= 1360). SAFE_BOTTOM = H - danger_line = 1920 - 1360.
 SAFE_TOP = 108
-SAFE_BOTTOM = 200       # leaves room for OpusClip's bottom subtitle track
+SAFE_BOTTOM = 560
 
 # ---- vertical anchor per placement (fraction of H = the text-block CENTER) ----
+# All four placements now live ABOVE the danger line at 0.71H.
 PLACEMENTS = {
-    "top": 0.17,
-    "center": 0.50,
-    "lower_third": 0.68,
-    "bottom": 0.82,
+    "top": 0.17,          # attention grab, well clear of the presenter
+    "center": 0.45,       # punchy standalone — reserved, and pulled up a touch
+    "lower_third": 0.56,  # over the presenter's chest/hands
+    "bottom": 0.66,       # strong anchor — the last safe rung above the danger zone
 }
 
 # ---- lower-third rule bars ----
@@ -248,7 +252,13 @@ if __name__ == "__main__":
         for yy in range(H):
             t = yy / H
             cp[0, yy] = tuple(int(top[i] * (1 - t) + bot[i] * t) for i in range(3)) + (255,)
-        return col.resize((W, H))
+        bg = col.resize((W, H))
+        # visualise the OpusClip danger zone so we can eyeball placements
+        danger_y = H - SAFE_BOTTOM
+        d = ImageDraw.Draw(bg)
+        d.rectangle([0, danger_y, W, H], fill=(70, 0, 0, 90))
+        d.line([(0, danger_y), (W, danger_y)], fill=(255, 60, 60, 255), width=4)
+        return bg
 
     for idx, (text, place) in enumerate(samples):
         slug = text.lower().replace(" ", "_")
