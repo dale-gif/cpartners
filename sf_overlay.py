@@ -35,16 +35,22 @@ MAX_W = W - 2 * SIDE_MARGIN
 LINE_GAP = 12
 MAX_LINES = 2           # NEVER stack more than two lines
 
-# ---- vertical safe zone (only prevents literal clipping off the frame) ----
-SAFE_TOP = 60
-SAFE_BOTTOM = 60
+# ---- vertical safe zone ----
+# SAFE_BOTTOM protects the OpusClip DANGER ZONE (subtitle track + CTA +
+# progress bar) that lives in the bottom ~28% of the exported canvas.
+# Text (and rule bars) get clamped up so nothing crosses y = H - SAFE_BOTTOM.
+SAFE_TOP = 80
+SAFE_BOTTOM = 540       # danger line at y = 1380
 
-# ---- vertical anchor per placement (Larry-locked from the reference deck) ----
+# ---- vertical anchor per placement (Larry-locked TARGETS) ----
+# `bottom` and (when block+bars are tall) `lower_third` are pulled up by the
+# clamp so they never enter the danger zone. Larry's approved size/style is
+# preserved — only their y-anchor gets nudged when required for safety.
 PLACEMENTS = {
     "top": 0.13,          # near the top edge — attention grab on entry
     "center": 0.55,       # high-impact; RESERVED for punchy standalone lines
     "lower_third": 0.70,  # over/under rule bars; keeps the presenter visible
-    "bottom": 0.86,       # strong anchor at the bottom edge
+    "bottom": 0.86,       # strong anchor at the bottom edge (clamped to safe area)
 }
 
 # ---- lower-third rule bars ----
@@ -141,8 +147,12 @@ def render_sf_overlay(text: str, placement: str, font_dir: Path, out_path: Path)
     cy = int(H * PLACEMENTS[placement])
     top_y = cy - block_h // 2
 
-    # Clamp inside the safe frame so no line ever clips off top or bottom.
-    max_top = H - SAFE_BOTTOM - block_h
+    # Clamp inside the safe frame so no text or rule bar ever crosses into
+    # the OpusClip danger zone at the bottom (or clips off the top).
+    # For lower_third, the lower rule bar hangs BAR_GAP + BAR_H below the
+    # text block — account for it so the bar itself stays above the line.
+    bar_overhang = BAR_GAP + BAR_H if placement == "lower_third" else 0
+    max_top = H - SAFE_BOTTOM - block_h - bar_overhang
     top_y = max(SAFE_TOP, min(top_y, max_top))
 
     def _line_x(line: str) -> int:
@@ -243,7 +253,13 @@ if __name__ == "__main__":
         for yy in range(H):
             t = yy / H
             cp[0, yy] = tuple(int(top[i] * (1 - t) + bot[i] * t) for i in range(3)) + (255,)
-        return col.resize((W, H))
+        bg = col.resize((W, H))
+        # OpusClip danger band — text + rule bars must stay above the red line.
+        danger_y = H - SAFE_BOTTOM
+        d = ImageDraw.Draw(bg)
+        d.rectangle([0, danger_y, W, H], fill=(70, 0, 0, 90))
+        d.line([(0, danger_y), (W, danger_y)], fill=(255, 60, 60, 255), width=4)
+        return bg
 
     for idx, (text, place) in enumerate(samples):
         slug = text.lower().replace(" ", "_")
