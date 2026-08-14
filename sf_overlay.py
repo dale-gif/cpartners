@@ -181,7 +181,9 @@ def assign_placements(overlays: list[dict]) -> list[str]:
             center_used = center_used or explicit == "center"
             continue
         words = _overlay_text(ov).split()
-        punchy = bool(ov.get("punchy")) or len(words) <= CENTER_MAX_WORDS
+        # CENTER is deliberate: only a line explicitly flagged punchy (and short
+        # enough to land clean) takes it — never just because a line is short.
+        punchy = bool(ov.get("punchy")) and len(words) <= CENTER_MAX_WORDS
         if punchy and not center_used and (not out or out[-1] != "center"):
             out.append("center")
             center_used = True
