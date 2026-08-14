@@ -26,40 +26,36 @@ W, H = 1080, 1920
 
 WHITE = (255, 255, 255, 255)
 
-# ---- text sizing ----
-MAX_SIZE = 140          # starting font size; auto-shrinks to fit width
-MIN_SIZE = 72           # floor for single-line fits (still bold + readable)
-WRAP_MIN_SIZE = 56      # deeper floor allowed only when forced to wrap
-SIDE_MARGIN = 72        # keep text off the frame edges
+# ---- text sizing (Larry-approved reference: 1-3 word hooks, near-full-width) ----
+MAX_SIZE = 220          # matches Larry's reference: huge, scroll-stopping
+MIN_SIZE = 108          # floor for single-line fits
+WRAP_MIN_SIZE = 84      # deeper floor allowed only when forced to wrap
+SIDE_MARGIN = 48        # tight — Larry's text runs nearly edge-to-edge
 MAX_W = W - 2 * SIDE_MARGIN
-LINE_GAP = 14
+LINE_GAP = 12
 MAX_LINES = 2           # NEVER stack more than two lines
 
-# ---- vertical safe zone (block stays inside these bounds) ----
-# Larry-flagged BLACK DANGER ZONE: bottom ~30% of the frame is reserved for
-# OpusClip's subtitle track + CTA + progress bar. Our OSTs must stay ABOVE
-# the danger line (y ~= 1360). SAFE_BOTTOM = H - danger_line = 1920 - 1360.
-SAFE_TOP = 108
-SAFE_BOTTOM = 560
+# ---- vertical safe zone (only prevents literal clipping off the frame) ----
+SAFE_TOP = 60
+SAFE_BOTTOM = 60
 
-# ---- vertical anchor per placement (fraction of H = the text-block CENTER) ----
-# All four placements now live ABOVE the danger line at 0.71H.
+# ---- vertical anchor per placement (Larry-locked from the reference deck) ----
 PLACEMENTS = {
-    "top": 0.17,          # attention grab, well clear of the presenter
-    "center": 0.45,       # punchy standalone — reserved, and pulled up a touch
-    "lower_third": 0.56,  # over the presenter's chest/hands
-    "bottom": 0.66,       # strong anchor — the last safe rung above the danger zone
+    "top": 0.13,          # near the top edge — attention grab on entry
+    "center": 0.55,       # high-impact; RESERVED for punchy standalone lines
+    "lower_third": 0.70,  # over/under rule bars; keeps the presenter visible
+    "bottom": 0.86,       # strong anchor at the bottom edge
 }
 
 # ---- lower-third rule bars ----
-BAR_W = 640
+BAR_W = 720
 BAR_H = 6
-BAR_GAP = 30            # gap between a bar and the text block
+BAR_GAP = 34            # gap between a bar and the text block
 
-# ---- soft blurred drop shadow (legibility over any background) ----
-SHADOW_OFFSET = 5
-SHADOW_BLUR = 12
-SHADOW_ALPHA = 170
+# ---- subtle drop shadow (just enough for legibility; reference uses clean white) ----
+SHADOW_OFFSET = 3
+SHADOW_BLUR = 8
+SHADOW_ALPHA = 110
 
 # CENTER is reserved for short, punchy standalone lines.
 CENTER_MAX_WORDS = 3
@@ -231,17 +227,12 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
     font_dir = Path("fonts")
 
-    # Real failure cases from Dale's screenshots — must render single-line
-    # and stay inside the safe frame.
+    # Larry-approved reference deck: 1-3 word hooks, one placement each.
     samples = [
-        ("STILL OWE YOU MONEY", "top"),      # was clipping off top of frame
-        ("OWED MONEY", "lower_third"),       # was stacking to 2 huge lines
-        ("YOUR MONEY", "center"),            # was stacking to 2 huge lines
-        ("HALF", "bottom"),
-        ("BE RECOVERED", "lower_third"),     # was colliding with HALF at bottom
-        ("GET PAID", "top"),
-        ("MISTAKE", "bottom"),
+        ("STILL OWE", "top"),
+        ("THEY DO PAY", "center"),
         ("30 DAYS", "lower_third"),
+        ("STILL OWE", "bottom"),
     ]
 
     def _backdrop() -> Image.Image:
@@ -252,13 +243,7 @@ if __name__ == "__main__":
         for yy in range(H):
             t = yy / H
             cp[0, yy] = tuple(int(top[i] * (1 - t) + bot[i] * t) for i in range(3)) + (255,)
-        bg = col.resize((W, H))
-        # visualise the OpusClip danger zone so we can eyeball placements
-        danger_y = H - SAFE_BOTTOM
-        d = ImageDraw.Draw(bg)
-        d.rectangle([0, danger_y, W, H], fill=(70, 0, 0, 90))
-        d.line([(0, danger_y), (W, danger_y)], fill=(255, 60, 60, 255), width=4)
-        return bg
+        return col.resize((W, H))
 
     for idx, (text, place) in enumerate(samples):
         slug = text.lower().replace(" ", "_")

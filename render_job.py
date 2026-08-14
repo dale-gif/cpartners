@@ -509,9 +509,10 @@ SF_SYSTEM = (
     "verbose_json transcript of a ~1 minute vertical (9:16) Australian "
     "construction debt-recovery clip and choose the punchiest on-screen-text "
     "'hooks'.\n\n"
-    "STYLE (Larry-locked): white ALL-CAPS text, 1-3 words per line, taken "
-    "VERBATIM from what the presenter actually says — never paraphrase, never "
-    "invent words. Punchy and scroll-stopping.\n\n"
+    "STYLE (Larry-locked): white ALL-CAPS text, HARD LIMIT 1-3 words TOTAL per "
+    "hook (never 4, never 'lines that stack' — one short phrase, one line, "
+    "period), taken VERBATIM from what the presenter actually says — never "
+    "paraphrase, never invent words. Punchy and scroll-stopping.\n\n"
     "WHAT TO PICK: the emotional / high-impact peaks — the lines that make "
     "someone stop scrolling (e.g. STILL OWE, THEY DON'T PAY, YOU WAITED, GET "
     "PAID, 30 DAYS). Cut each to 1-3 words. Space them roughly one every "
@@ -561,12 +562,28 @@ def sf_plan(transcript: dict, duration: float) -> dict:
         raise RuntimeError("No JSON object in SF planner output")
     plan = json.loads(text[first : last + 1])
 
-    kept, dropped, punchy_seen = [], 0, False
+    kept, dropped, punchy_seen, trimmed = [], 0, False, 0
     for ov in plan.get("text_overlays") or []:
         ts = float(ov.get("timestamp", -1))
         if ts < 0 or ts > safe_end:
             dropped += 1
             continue
+        # Enforce Larry's HARD 1-3 word cap: flatten `lines` to a single line
+        # and trim to the first 3 words. Prevents 4+ word hooks (like
+        # "STILL OWE YOU MONEY") that force awkward multi-line wraps.
+        raw = ov.get("lines")
+        if isinstance(raw, list):
+            phrase = " ".join(str(x) for x in raw if x).strip()
+        else:
+            phrase = str(ov.get("text") or "").strip()
+        words = phrase.split()
+        if len(words) > 3:
+            phrase = " ".join(words[:3])
+            trimmed += 1
+        elif not words:
+            dropped += 1
+            continue
+        ov["lines"] = [phrase]
         if ov.get("punchy"):
             if punchy_seen:          # enforce a single centered punchy line
                 ov.pop("punchy", None)
@@ -577,6 +594,8 @@ def sf_plan(transcript: dict, duration: float) -> dict:
     plan["text_overlays"] = kept
     if dropped:
         log(f"SF plan: dropped {dropped} hook(s) outside 0..{safe_end:.1f}s")
+    if trimmed:
+        log(f"SF plan: trimmed {trimmed} hook(s) to Larry's 3-word cap")
     log(f"SF plan: {len(kept)} OST hook(s), punchy={'yes' if punchy_seen else 'none'}")
     return plan
 
