@@ -22,7 +22,8 @@ from sf_overlay import assign_placements, render_sf_overlay
 
 W, H = 1080, 1920           # portrait 9:16
 FADE = 0.5                  # alpha fade in/out (Larry: ~12 frames @25fps, never slide)
-OVERLAY_HOLD = 2.5          # SF on-screen text hold (punchy; Larry keeps text <=3s)
+OVERLAY_HOLD = 2.2          # SF on-screen text hold (punchy; Larry keeps text <=3s)
+MIN_GAP = 0.35              # min gap between consecutive OSTs (prevents fade collision)
 
 
 @dataclass
@@ -133,6 +134,15 @@ def render_sf_onto(base_video: Path, plan: dict, out_dir: Path, font_dir: Path) 
             hold=float(ov.get("hold", OVERLAY_HOLD)),
         ))
     assets.sort(key=lambda a: a.start)
+
+    # De-collide: enforce a gap so no two OSTs share the frame (fade collision
+    # like the HALF / BE RECOVERED overlap Dale flagged). Same idea as the MF
+    # path's `s < last_end + 0.5` guard in render_job.py.
+    last_end = -1e9
+    for a in assets:
+        if a.start < last_end + MIN_GAP:
+            a.start = last_end + MIN_GAP
+        last_end = a.start + a.hold
 
     out = out_dir / "final.mp4"
     _composite(base_video, assets, out)

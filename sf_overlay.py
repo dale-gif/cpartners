@@ -27,18 +27,24 @@ W, H = 1080, 1920
 WHITE = (255, 255, 255, 255)
 
 # ---- text sizing ----
-MAX_SIZE = 172          # starting font size; auto-shrinks to fit width
-MIN_SIZE = 68
-SIDE_MARGIN = 64        # keep text off the frame edges
+MAX_SIZE = 140          # starting font size; auto-shrinks to fit width
+MIN_SIZE = 72           # floor for single-line fits (still bold + readable)
+WRAP_MIN_SIZE = 56      # deeper floor allowed only when forced to wrap
+SIDE_MARGIN = 72        # keep text off the frame edges
 MAX_W = W - 2 * SIDE_MARGIN
-LINE_GAP = 16
+LINE_GAP = 14
+MAX_LINES = 2           # NEVER stack more than two lines
+
+# ---- vertical safe zone (block stays inside these bounds) ----
+SAFE_TOP = 108
+SAFE_BOTTOM = 200       # leaves room for OpusClip's bottom subtitle track
 
 # ---- vertical anchor per placement (fraction of H = the text-block CENTER) ----
 PLACEMENTS = {
-    "top": 0.15,
+    "top": 0.17,
     "center": 0.50,
-    "lower_third": 0.70,
-    "bottom": 0.85,
+    "lower_third": 0.68,
+    "bottom": 0.82,
 }
 
 # ---- lower-third rule bars ----
@@ -79,18 +85,34 @@ def _wrap(words, font, draw, max_w):
 
 
 def _fit(text, font_dir, draw):
-    """Auto-shrink + wrap so the block fits MAX_W. Returns (font, lines)."""
+    """Prefer ONE line at the biggest size that fits. Only wrap when a
+    single-line fit at MIN_SIZE still overflows. Never returns >MAX_LINES.
+    """
     words = text.upper().split()
-    size = MAX_SIZE
-    while size > MIN_SIZE:
+    if not words:
+        return _load_font(font_dir, MIN_SIZE), []
+
+    joined = " ".join(words)
+
+    # 1) Single line — biggest size that fits horizontally.
+    for size in range(MAX_SIZE, MIN_SIZE - 1, -4):
+        font = _load_font(font_dir, size)
+        if draw.textbbox((0, 0), joined, font=font)[2] <= MAX_W:
+            return font, [joined]
+
+    # 2) Forced wrap — shrink further, cap at MAX_LINES lines.
+    for size in range(MAX_SIZE, WRAP_MIN_SIZE - 1, -4):
         font = _load_font(font_dir, size)
         lines = _wrap(words, font, draw, MAX_W)
-        widest = max(draw.textbbox((0, 0), ln, font=font)[2] for ln in lines)
-        if widest <= MAX_W:
-            return font, lines
-        size -= 4
-    font = _load_font(font_dir, MIN_SIZE)
-    return font, _wrap(words, font, draw, MAX_W)
+        if len(lines) <= MAX_LINES:
+            widest = max(draw.textbbox((0, 0), ln, font=font)[2] for ln in lines)
+            if widest <= MAX_W:
+                return font, lines
+
+    # 3) Fallback: force even 2-line split at the floor size.
+    font = _load_font(font_dir, WRAP_MIN_SIZE)
+    mid = (len(words) + 1) // 2
+    return font, [" ".join(words[:mid]), " ".join(words[mid:])]
 
 
 def render_sf_overlay(text: str, placement: str, font_dir: Path, out_path: Path) -> Path:
@@ -118,6 +140,10 @@ def render_sf_overlay(text: str, placement: str, font_dir: Path, out_path: Path)
 
     cy = int(H * PLACEMENTS[placement])
     top_y = cy - block_h // 2
+
+    # Clamp inside the safe frame so no line ever clips off top or bottom.
+    max_top = H - SAFE_BOTTOM - block_h
+    top_y = max(SAFE_TOP, min(top_y, max_top))
 
     def _line_x(line: str) -> int:
         lw = draw.textbbox((0, 0), line, font=font)[2]
@@ -201,11 +227,17 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
     font_dir = Path("fonts")
 
+    # Real failure cases from Dale's screenshots — must render single-line
+    # and stay inside the safe frame.
     samples = [
-        ("STILL OWE", "top"),
-        ("THEY DO PAY", "center"),
+        ("STILL OWE YOU MONEY", "top"),      # was clipping off top of frame
+        ("OWED MONEY", "lower_third"),       # was stacking to 2 huge lines
+        ("YOUR MONEY", "center"),            # was stacking to 2 huge lines
+        ("HALF", "bottom"),
+        ("BE RECOVERED", "lower_third"),     # was colliding with HALF at bottom
+        ("GET PAID", "top"),
+        ("MISTAKE", "bottom"),
         ("30 DAYS", "lower_third"),
-        ("STILL OWE", "bottom"),
     ]
 
     def _backdrop() -> Image.Image:
@@ -218,10 +250,11 @@ if __name__ == "__main__":
             cp[0, yy] = tuple(int(top[i] * (1 - t) + bot[i] * t) for i in range(3)) + (255,)
         return col.resize((W, H))
 
-    for text, place in samples:
-        ov_png = out_dir / f"_ov_{place}.png"
+    for idx, (text, place) in enumerate(samples):
+        slug = text.lower().replace(" ", "_")
+        ov_png = out_dir / f"_ov_{idx:02d}_{place}_{slug}.png"
         render_sf_overlay(text, place, font_dir, ov_png)
         comp = Image.alpha_composite(_backdrop(), Image.open(ov_png).convert("RGBA"))
-        comp.convert("RGB").save(out_dir / f"sf_{place}.png")
+        comp.convert("RGB").save(out_dir / f"sf_{idx:02d}_{place}_{slug}.png")
         print(f"rendered {place}: {text}")
     print(f"previews written to {out_dir}")
