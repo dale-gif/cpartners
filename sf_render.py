@@ -108,16 +108,17 @@ def _composite(base_video: Path, assets: list[_Timed], out_path: Path) -> Path:
     return out_path
 
 
-def render_job_sf(job_id: str, plan: dict, base_video_url: str,
-                  work_root: Path, font_dir: Path) -> Path:
-    """SF portrait pipeline for one job. Returns the final MP4 path.
+def render_sf_onto(base_video: Path, plan: dict, out_dir: Path, font_dir: Path) -> Path:
+    """Burn the SF OST overlays from `plan` onto a LOCAL portrait base video.
+
+    Reusable core — no download. The GitHub render path calls this directly with
+    an already-downloaded clip; render_job_sf() wraps it with a URL download.
 
     `plan.text_overlays` = [{timestamp, lines|text, hold?, placement?, punchy?}].
     Placement is content-aware unless the overlay pins it explicitly.
     """
-    work = Path(work_root) / job_id
-    work.mkdir(parents=True, exist_ok=True)
-    base_video = _download(base_video_url, work / "base.mp4")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     overlays = list(plan.get("text_overlays") or [])
     placements = assign_placements(overlays)
@@ -125,7 +126,7 @@ def render_job_sf(job_id: str, plan: dict, base_video_url: str,
     assets: list[_Timed] = []
     for i, (ov, place) in enumerate(zip(overlays, placements)):
         png = render_sf_overlay(
-            _overlay_text(ov), place, Path(font_dir), work / f"sf_ov_{i}.png")
+            _overlay_text(ov), place, Path(font_dir), out_dir / f"sf_ov_{i}.png")
         assets.append(_Timed(
             png=png,
             start=float(ov.get("timestamp", 0)),
@@ -133,6 +134,15 @@ def render_job_sf(job_id: str, plan: dict, base_video_url: str,
         ))
     assets.sort(key=lambda a: a.start)
 
-    out = work / "final.mp4"
+    out = out_dir / "final.mp4"
     _composite(base_video, assets, out)
     return out
+
+
+def render_job_sf(job_id: str, plan: dict, base_video_url: str,
+                  work_root: Path, font_dir: Path) -> Path:
+    """SF portrait pipeline for one job (URL in). Returns the final MP4 path."""
+    work = Path(work_root) / job_id
+    work.mkdir(parents=True, exist_ok=True)
+    base_video = _download(base_video_url, work / "base.mp4")
+    return render_sf_onto(base_video, plan, work, font_dir)

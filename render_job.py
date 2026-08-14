@@ -27,6 +27,7 @@ from compose_from_plan import (
     composite_clips,
 )
 from animations import render_infographic_clip, render_overlay_clip
+from sf_render import render_sf_onto
 
 # How long each cutaway's entrance animation runs before it holds on the final
 # frame. The clip's total on-screen time is `hold`; entrance is the first
@@ -242,6 +243,19 @@ def video_duration(video: Path) -> float:
         capture_output=True, text=True, check=True,
     )
     return float(r.stdout.strip())
+
+
+def video_dimensions(video: Path) -> tuple[int, int]:
+    """Return (width, height) of the first video stream via ffprobe."""
+    r = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", str(video),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    w, h = r.stdout.strip().split("x")[:2]
+    return int(w), int(h)
 
 
 def whisper_transcribe(audio: Path) -> dict:
@@ -486,6 +500,120 @@ def build_assets(plan: dict) -> list[TimedClip]:
     return clips
 
 
+# ── SF (portrait 9:16) path ─────────────────────────────────────────────────
+# Larry-approved short-form on-screen text: pure white ALL-CAPS 1-3 word hooks,
+# placed top / center / lower-third / bottom (content-aware), 0.5s fades. The
+# planner picks the hooks VERBATIM from the clip's own speech.
+SF_SYSTEM = (
+    "You are the CRP short-form (SF) on-screen-text planner. You read a Whisper "
+    "verbose_json transcript of a ~1 minute vertical (9:16) Australian "
+    "construction debt-recovery clip and choose the punchiest on-screen-text "
+    "'hooks'.\n\n"
+    "STYLE (Larry-locked): white ALL-CAPS text, 1-3 words per line, taken "
+    "VERBATIM from what the presenter actually says — never paraphrase, never "
+    "invent words. Punchy and scroll-stopping.\n\n"
+    "WHAT TO PICK: the emotional / high-impact peaks — the lines that make "
+    "someone stop scrolling (e.g. STILL OWE, THEY DON'T PAY, YOU WAITED, GET "
+    "PAID, 30 DAYS). Cut each to 1-3 words. Space them roughly one every "
+    "8-12 seconds across the clip.\n\n"
+    "QUOTA: 4-6 hooks for a ~60s clip (about one per 10s); never fewer than 3. "
+    "Mark EXACTLY ONE — the single most impactful gut-punch line — with "
+    "\"punchy\":true (it gets the big centered treatment). Never flag more than "
+    "one.\n\n"
+    "TIMING: timestamp = the second the presenter says that idea (use the "
+    "transcript word timings). Keep the LAST 4 seconds clear for the CTA end "
+    "frame — no hook may land there.\n\n"
+    "Return ONLY a JSON object and nothing else:\n"
+    "{\"text_overlays\":[{\"timestamp\":<seconds>,\"lines\":[\"WORD\",\"WORD\"],"
+    "\"punchy\":<true for the single best; omit otherwise>}]}"
+)
+
+
+def sf_plan(transcript: dict, duration: float) -> dict:
+    """Whisper transcript -> SF OST plan (short punchy hooks). SF path only."""
+    safe_end = max(0.0, duration - 4.0)
+    user_msg = (
+        f"Whisper verbose_json for a {duration:.0f}s vertical SF clip.\n"
+        f"Every hook timestamp must be <= {safe_end:.1f} (the last 4s is the CTA "
+        f"end frame). Pick 4-6 verbatim 1-3 word hooks; flag exactly one "
+        f"punchy.\n\nTRANSCRIPT_JSON:\n{json.dumps(transcript)}"
+    )
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-opus-4-5",
+            "max_tokens": 1500,
+            "system": SF_SYSTEM,
+            "messages": [{"role": "user", "content": user_msg}],
+        },
+        timeout=180,
+    )
+    if not r.ok:
+        raise RuntimeError(f"claude SF plan {r.status_code}: {r.text[:500]}")
+    text = r.json()["content"][0]["text"].strip()
+    first, last = text.find("{"), text.rfind("}")
+    if first == -1 or last == -1:
+        raise RuntimeError("No JSON object in SF planner output")
+    plan = json.loads(text[first : last + 1])
+
+    kept, dropped, punchy_seen = [], 0, False
+    for ov in plan.get("text_overlays") or []:
+        ts = float(ov.get("timestamp", -1))
+        if ts < 0 or ts > safe_end:
+            dropped += 1
+            continue
+        if ov.get("punchy"):
+            if punchy_seen:          # enforce a single centered punchy line
+                ov.pop("punchy", None)
+            else:
+                punchy_seen = True
+        kept.append(ov)
+    kept.sort(key=lambda o: float(o.get("timestamp", 0)))
+    plan["text_overlays"] = kept
+    if dropped:
+        log(f"SF plan: dropped {dropped} hook(s) outside 0..{safe_end:.1f}s")
+    log(f"SF plan: {len(kept)} OST hook(s), punchy={'yes' if punchy_seen else 'none'}")
+    return plan
+
+
+def render_sf_portrait(video: Path, audio: Path, w: int, h: int) -> None:
+    """SF (portrait 9:16) branch: auto-detected -> Whisper -> SF OST -> composite."""
+    log(f"portrait {w}x{h} detected -> SF on-screen-text path")
+
+    log("[2/4] extract audio")
+    extract_audio(video, audio)
+    duration = video_duration(video)
+    log(f"SF clip duration: {duration:.1f}s")
+
+    log("[3/4] whisper transcription")
+    transcript = whisper_transcribe(audio)
+    (WORK / "whisper.json").write_text(json.dumps(transcript))
+
+    plan = sf_plan(transcript, duration)
+    (WORK / "plan.json").write_text(json.dumps(plan, indent=2))
+    for i, ov in enumerate(plan.get("text_overlays") or []):
+        log(f"  OST {i}: t={ov.get('timestamp')}s punchy={bool(ov.get('punchy'))} "
+            f"lines={ov.get('lines')}")
+
+    log("[4/4] composite (SF portrait)")
+    final = render_sf_onto(video, plan, WORK, FONT_DIR)
+
+    filename = f"{VIDEO_ID}_CRP_SF.mp4"
+    out = Path("out") / filename
+    out.parent.mkdir(exist_ok=True)
+    final.rename(out)
+    log(f"ready for release upload: {out}")
+
+    with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
+        f.write(f"filename={filename}\n")
+        f.write(f"output_path={out}\n")
+
+
 def main() -> None:
     WORK.mkdir(exist_ok=True)
     video = WORK / "input.mp4"
@@ -494,6 +622,13 @@ def main() -> None:
 
     log("[1/5] download OpusClip MP4")
     download_video(OPUS_URL, video)
+
+    # Auto-detect orientation: portrait (9:16) -> SF on-screen-text path;
+    # landscape stays on the MF/LF flow below, unchanged.
+    w, h = video_dimensions(video)
+    if h > w:
+        render_sf_portrait(video, audio, w, h)
+        return
 
     log("[2/5] extract audio")
     extract_audio(video, audio)
