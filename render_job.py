@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +45,75 @@ OPENAI_KEY = os.environ["OPENAI_API_KEY"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 FONT_DIR = Path(os.environ.get("FONT_DIR", "fonts"))
 WORK = Path("work")
+
+# ── COLUMN F: ON-SCREEN SUBSTITUTIONS (Larry v2 dictionary) ──────────────────
+# The avatar speaks plain English ("director penalty notices", "the tax office")
+# so the voice sounds professional. On-screen text overlays, however, must use
+# the punchy acronym ("DPN", "ATO") so the visual stays short and doesn't
+# overtake the avatar's face. This is Larry's Column F "on-screen display"
+# layer from CRP_AU_Script_Dictionary_v2.xlsx. Applied deterministically to
+# every overlay line after Claude plans them — not left to the AI to comply.
+COLUMN_F_SUBSTITUTIONS = [
+    (r"\bDIRECTOR PENALTY NOTICES\b", "DPNs"),
+    (r"\bDIRECTOR PENALTY NOTICE\b", "DPN"),
+    (r"\bTHE TAX OFFICE\b", "ATO"),
+    (r"\bBUSINESS ACTIVITY STATEMENTS\b", "BAS"),
+    (r"\bBUSINESS ACTIVITY STATEMENT\b", "BAS"),
+    (r"\bPAY[- ]AS[- ]YOU[- ]GO TAX\b", "PAYG"),
+    (r"\bPAY AS YOU GO TAX\b", "PAYG"),
+    (r"\bGOODS AND SERVICES TAX\b", "GST"),
+    (r"\bSECURITY OF PAYMENT ACT\b", "SOPA"),
+    (r"\bSECURITY OF PAYMENT\b", "SOPA"),
+    (r"\bA DEED OF COMPANY ARRANGEMENT\b", "DOCA"),
+    (r"\bDEED OF COMPANY ARRANGEMENT\b", "DOCA"),
+    (r"\bVOLUNTARY ADMINISTRATION\b", "VA"),
+    (r"\bTHE CORPORATE REGULATOR\b", "ASIC"),
+    (r"\bAUSTRALIAN DOLLARS\b", "AUD"),
+    (r"\bAUSTRALIAN DOLLAR\b", "AUD"),
+    (r"\bPURCHASE ORDER NUMBER\b", "PO NUMBER"),
+    (r"\bPURCHASE ORDER\b", "PO"),
+    (r"\bSUPERANNUATION GUARANTEE\b", "SGC"),
+]
+
+# On-screen text is bounded HARD. The AI planner sometimes emits long lines
+# (e.g. "85,000 DIRECTOR PENALTY NOTICES") which cover the avatar's face when
+# rendered full-frame as a peak hook. We enforce below the AI's judgement.
+MAX_OVERLAY_WORDS = 3       # per line, for standard black-gradient overlays
+MAX_OVERLAY_CHARS = 14      # per line, matches the AI prompt's stated limit
+MAX_PEAK_WORDS = 2          # per line, for full-frame peak (big-text) overlays
+MAX_PEAK_CHARS = 12         # per line, for full-frame peak — extra strict
+
+
+def apply_column_f(text: str) -> str:
+    """Substitute long spoken phrases with punchier on-screen acronyms."""
+    if not text:
+        return text
+    upper = text.upper()
+    for pattern, replacement in COLUMN_F_SUBSTITUTIONS:
+        upper = re.sub(pattern, replacement, upper)
+    return upper
+
+
+def enforce_overlay_lines(lines, is_peak: bool = False):
+    """Apply Column F + hard word/char caps to an overlay's lines.
+
+    Peak overlays (full-frame black takeover) get a stricter cap because they
+    cover the avatar and any long text visually dominates the frame.
+    """
+    max_words = MAX_PEAK_WORDS if is_peak else MAX_OVERLAY_WORDS
+    max_chars = MAX_PEAK_CHARS if is_peak else MAX_OVERLAY_CHARS
+    out = []
+    for raw in (lines or [])[:3]:
+        line = apply_column_f(str(raw).strip())
+        words = line.split()
+        if len(words) > max_words:
+            line = " ".join(words[:max_words])
+        if len(line) > max_chars:
+            line = line[:max_chars].rstrip()
+        if line:
+            out.append(line)
+    return out
+
 
 CLAUDE_SYSTEM = (
     "You are the GODTIER graphic planner for CRP videos. You read a Whisper "
@@ -88,10 +158,31 @@ CLAUDE_SYSTEM = (
     "notice), chart (growth/results), edit (sign/write), folder (file/case), "
     "target (goal/focus), calendar (schedule/date), star (best practice/quality), "
     "building (company/business). Use the single word only (e.g. \"scales\").\n\n"
-    "TEXT OVERLAY SCHEMA: exactly 3 lines per overlay; each line 1-5 words, "
+    "TEXT OVERLAY SCHEMA: exactly 3 lines per overlay; each line 1-3 words, "
     "<=14 chars. Punchy. Rule of 3. Break aggressively: "
     "'THE RELATIONSHIP IS DAMAGED YOU FEEL IT' becomes "
     "['RELATIONSHIP', 'ALREADY DAMAGED', 'YOU FEEL IT']. "
+    "  ON-SCREEN SUBSTITUTIONS (Larry's Column F — HARD): when the avatar says "
+    "a long spoken phrase, the on-screen text MUST use the acronym version "
+    "so the visual stays short and does NOT overtake the avatar's face:\n"
+    "    'director penalty notice(s)' -> 'DPN' / 'DPNs'\n"
+    "    'the tax office' -> 'ATO'\n"
+    "    'business activity statement(s)' -> 'BAS'\n"
+    "    'pay-as-you-go tax' -> 'PAYG'\n"
+    "    'goods and services tax' -> 'GST'\n"
+    "    'security of payment (act)' -> 'SOPA'\n"
+    "    'a deed of company arrangement' -> 'DOCA'\n"
+    "    'voluntary administration' -> 'VA'\n"
+    "    'personal property (securities) register' -> 'PPSR'\n"
+    "    'Australian dollars' -> 'AUD'\n"
+    "  NEVER put a full spoken phrase like '85,000 DIRECTOR PENALTY NOTICES' "
+    "on-screen — write '85,000 DPNs' instead. Keep the frame clear of the "
+    "avatar. This is enforced post-plan; failing to comply means your line "
+    "will be truncated automatically.\n"
+    "  PEAK OVERLAY CHAR LIMIT (HARDER): peak-marked overlays go FULL-FRAME "
+    "opaque covering the avatar. Each peak line MUST be 1-2 words AND <=12 "
+    "chars. If your punchy line needs more, DO NOT set peak=true — use the "
+    "black-gradient side overlay instead so the avatar stays visible.\n"
     "  timestamp : seconds — when the line lands.\n"
     "  hold      : seconds — how long the text stays up. ~3s (MAXIMUM 3). "
     "              Punchy: long enough to read a 1-3 word hook, then cut.\n"
@@ -422,6 +513,29 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
         log(f"de-collide: dropped {dropped_ov} overlay(s) overlapping an "
             f"infographic or another overlay")
     plan["text_overlays"] = kept_ov
+
+    # Column F substitution + hard char/word cap enforcement.
+    # Runs AFTER style assignment so peak overlays get the stricter cap.
+    # This is what prevents "85,000 DIRECTOR PENALTY NOTICES" from ever
+    # reaching the compositor as a full-frame black takeover covering the
+    # avatar — long spoken phrases collapse to acronyms, and anything still
+    # over the limit gets truncated. Deterministic — not left to the AI.
+    substituted = 0
+    truncated = 0
+    for ov in plan["text_overlays"]:
+        original = list(ov.get("lines", []) or [])
+        is_peak = ov.get("style") == "big-text"
+        new_lines = enforce_overlay_lines(original, is_peak=is_peak)
+        if new_lines != [str(x).strip().upper() for x in original[:3] if str(x).strip()]:
+            substituted += 1
+        for orig, new in zip(original, new_lines):
+            if len(str(orig)) > len(new):
+                truncated += 1
+        ov["lines"] = new_lines
+    if substituted or truncated:
+        log(f"column F: {substituted} overlay(s) had lines substituted; "
+            f"{truncated} line(s) truncated to fit cap")
+
     log(f"overlays: {len(kept_ov)} total — {n_black} rare black takeover(s), "
         f"{len(kept_ov) - n_black} white side; all clear of infographics")
 
