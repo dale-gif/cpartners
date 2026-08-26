@@ -1,0 +1,84 @@
+name: Title Card Test
+
+# Proves the frame-one title card end to end WITHOUT running the full render (no Whisper, no
+# Claude planner, no OpusClip URL). Give it a cover URL; it prepends the card, then extracts
+# frame zero and a frame from after the card so you can see both.
+#
+# Same script render.yml uses, so a pass here means a pass there.
+
+on:
+  workflow_dispatch:
+    inputs:
+      coverUrl:
+        description: 'Public URL of the cover PNG (9:16). Must be anyone-with-link.'
+        required: true
+      cardSeconds:
+        description: 'How long to hold the card on screen'
+        required: false
+        default: '0.5'
+      videoUrl:
+        description: 'Optional source video. Blank generates a 5s 1080x1920 test clip.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  title-card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      # Inputs go through env, never interpolated straight into the shell.
+      - name: Get or generate a source video
+        env:
+          VIDEO_URL: ${{ inputs.videoUrl }}
+        run: |
+          mkdir -p out
+          if [ -n "${VIDEO_URL}" ]; then
+            echo "using supplied video"
+            curl -fsSL --retry 3 -o source.mp4 "${VIDEO_URL}"
+          else
+            echo "generating a 5s 9:16 test clip"
+            ffmpeg -y -v warning \
+              -f lavfi -i "testsrc=size=1080x1920:rate=30:duration=5" \
+              -f lavfi -i "sine=frequency=440:duration=5" \
+              -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest source.mp4
+          fi
+          ffprobe -v error -show_entries format=duration -of csv=p=0 source.mp4
+
+      - name: Prepend title card
+        env:
+          COVER_URL:    ${{ inputs.coverUrl }}
+          CARD_SECONDS: ${{ inputs.cardSeconds }}
+        run: |
+          chmod +x scripts/prepend_title_card.sh
+          scripts/prepend_title_card.sh source.mp4 "${COVER_URL}" "${CARD_SECONDS:-0.5}" out/with-card.mp4
+
+      - name: Extract proof frames
+        run: |
+          # Frame zero is what a platform sees if it takes the very first frame.
+          ffmpeg -y -v warning -i out/with-card.mp4 -vf "select=eq(n\,0)" -vframes 1 out/frame-000.png
+          # Well after the card, to prove the original video is still intact behind it.
+          ffmpeg -y -v warning -ss 2.0 -i out/with-card.mp4 -vframes 1 out/frame-at-2s.png
+          echo "### Title card test" >> $GITHUB_STEP_SUMMARY
+          echo "- source duration: $(ffprobe -v error -show_entries format=duration -of csv=p=0 source.mp4)s" >> $GITHUB_STEP_SUMMARY
+          echo "- output duration: $(ffprobe -v error -show_entries format=duration -of csv=p=0 out/with-card.mp4)s" >> $GITHUB_STEP_SUMMARY
+          echo "- card held: ${{ inputs.cardSeconds }}s" >> $GITHUB_STEP_SUMMARY
+
+      - name: Publish result
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: title-card-test-${{ github.run_id }}
+          name: Title card test ${{ github.run_id }}
+          body: 'Frame-one title card test. with-card.mp4 plus frame-000.png (what a platform sees) and frame-at-2s.png (video intact behind it).'
+          files: |
+            out/with-card.mp4
+            out/*.png
+          fail_on_unmatched_files: false
