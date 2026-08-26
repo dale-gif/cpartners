@@ -158,6 +158,39 @@ def check_beds_audible(path, voice_delay_ms, voice_len, outro_delay_ms, total):
              'make it into the mix.' % body)
 
 
+FLAT_FACTOR_LIMIT = 0.5
+
+
+def check_not_clipped(path):
+    """Reject a delivered file with sustained clipping.
+
+    amix with normalize=0 sums the bed and the voice, and the result can exceed
+    full scale - a real 27-minute build measured +2.0 dBTP before normalisation.
+    The mixer uses a float intermediate so nothing clamps, but that has to be
+    asserted rather than assumed: if anyone changes the intermediate back to
+    pcm_s16le, samples clamp permanently and loudnorm cannot undo it.
+
+    astats "Flat factor" counts consecutive identical samples, which is what
+    clipping looks like. A lone peak sample reads 0.0; a clipped passage does not.
+    """
+    proc = subprocess.run(
+        ['ffmpeg', '-hide_banner', '-nostats', '-v', 'info', '-i', path,
+         '-af', 'astats=metadata=1', '-f', 'null', '-'],
+        capture_output=True, text=True)
+    flat = re.search(r'Flat factor:\s*(-?\d+(?:\.\d+)?)', proc.stderr)
+    peak = re.search(r'Peak level dB:\s*(-?\d+(?:\.\d+)?)', proc.stderr)
+    if not flat or not peak:
+        fail('could not read astats for %s' % path)
+    f, p = float(flat.group(1)), float(peak.group(1))
+    print('4. peak %.2f dB, flat factor %.4f' % (p, f))
+    if f > FLAT_FACTOR_LIMIT:
+        fail('flat factor %.3f indicates sustained clipping in the delivered '
+             'file. Check that the mix intermediate is float, not 16-bit.' % f)
+    if p > -0.2:
+        fail('peak %.2f dB is at full scale - the file is almost certainly '
+             'clipped.' % p)
+
+
 def main():
     if len(sys.argv) != 6:
         raise SystemExit(__doc__)
@@ -170,6 +203,7 @@ def main():
     total = check_duration(path, expected)
     check_no_midstream_id3(path)
     check_beds_audible(path, voice_delay_ms, voice_len, outro_delay_ms, total)
+    check_not_clipped(path)
 
     print('verification passed')
 
