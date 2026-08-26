@@ -19,7 +19,7 @@ on:
       cardSeconds:
         description: 'How long to hold the title card as frame one'
         required: false
-        default: '0.5'
+        default: '1'
 
 permissions:
   contents: write   # required for softprops/action-gh-release
@@ -84,7 +84,7 @@ jobs:
             exit 1
           fi
           chmod +x scripts/prepend_title_card.sh
-          scripts/prepend_title_card.sh "${TARGET}" "${COVER_URL}" "${CARD_SECONDS:-0.5}" "${TARGET%.mp4}__carded.mp4"
+          scripts/prepend_title_card.sh "${TARGET}" "${COVER_URL}" "${CARD_SECONDS:-1}" "${TARGET%.mp4}__carded.mp4"
           mv "${TARGET%.mp4}__carded.mp4" "${TARGET}"
           echo "Title card baked into ${TARGET}"
 
