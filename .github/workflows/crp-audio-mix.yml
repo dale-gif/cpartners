@@ -1,0 +1,261 @@
+# =============================================================================
+# CRP Audio Mix - podcast music bed assembly
+# =============================================================================
+# Takes a finished voice track and lays the show's intro/outro music under it,
+# ducked, loudness-normalised to podcast spec, and returns one MP3.
+#
+# WHY workflow_dispatch AND NOT repository_dispatch
+# -------------------------------------------------
+# The ten MF/SF video watchers in n8n find their render by polling
+#     GET /actions/runs?event=repository_dispatch&per_page=5
+# and taking the NEWEST run in a 60-second window. They have no way to tell one
+# dispatch from another. If this workflow used repository_dispatch, an audio run
+# could become the "newest run" a video watcher latches onto, and that watcher
+# would then publish an MP3 in place of its video.
+#
+# workflow_dispatch runs are STRUCTURALLY ABSENT from that query - GitHub filters
+# by event type server-side. So this engine is invisible to the video pipeline
+# and needs zero changes to any of the ten watchers. Do not change this trigger.
+#
+# The release tag is keyed on ASSET ID, not run id, so the caller fetches its own
+# output deterministically instead of guessing by timestamp.
+#
+# The timeline arithmetic and the output verification live in .github/scripts/
+# rather than inline here, so both can be run against real files locally before
+# anyone trusts them in CI.
+# =============================================================================
+
+name: CRP Audio Mix
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id:
+        description: 'Asset ID, e.g. CRP-SR-EP02. Becomes the release tag.'
+        required: true
+        type: string
+      voice_url:
+        description: 'Direct-download URL for the voice MP3. Leave blank if using voice_release_tag.'
+        required: false
+        type: string
+      voice_release_tag:
+        description: 'Private alternative to voice_url - a release tag holding voice.mp3 as an asset.'
+        required: false
+        type: string
+      intro_bed:
+        description: 'Intro bed path in this repo.'
+        required: false
+        default: 'assets/audio/CRP_Show_Intro_v1.mp3'
+        type: string
+      outro_bed:
+        description: 'Outro bed path in this repo.'
+        required: false
+        default: 'assets/audio/CRP_Show_Outro_v1.mp3'
+        type: string
+      music_lead_out:
+        description: 'Seconds of intro music alone before the voice starts.'
+        required: false
+        default: '3.2'
+        type: string
+      outro_overlap:
+        description: 'Seconds the outro bed starts before the voice ends.'
+        required: false
+        default: '1.2'
+        type: string
+
+# Serialise per asset so one episode never mixes twice at once, while different
+# episodes still run in parallel. Deliberately NOT a single global group with
+# cancel-in-progress, which would have concurrent episodes killing each other.
+concurrency:
+  group: crp-audio-${{ inputs.asset_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  mix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repo (for the music beds and scripts)
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Fetch the voice track
+        env:
+          VOICE_URL: ${{ inputs.voice_url }}
+          VOICE_TAG: ${{ inputs.voice_release_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${VOICE_URL}" ]; then
+            echo "Downloading voice from URL"
+            curl -fsSL --retry 3 --retry-delay 5 -o voice_raw.mp3 "${VOICE_URL}"
+          elif [ -n "${VOICE_TAG}" ]; then
+            echo "Downloading voice from release ${VOICE_TAG}"
+            gh release download "${VOICE_TAG}" --pattern 'voice.mp3' --output voice_raw.mp3 --clobber
+          else
+            echo "::error::Supply either voice_url or voice_release_tag."
+            exit 1
+          fi
+          # A failed Drive or CDN fetch commonly returns an HTML error page with a
+          # 200 status. Fail loudly here rather than handing ffmpeg a web page.
+          if ! file voice_raw.mp3 | grep -qiE 'audio|mpeg|MP3'; then
+            echo "::error::Downloaded file is not audio. First bytes follow."
+            head -c 300 voice_raw.mp3 | od -c | head -5
+            exit 1
+          fi
+          ls -la voice_raw.mp3
+
+      - name: Verify the beds exist
+        env:
+          INTRO: ${{ inputs.intro_bed }}
+          OUTRO: ${{ inputs.outro_bed }}
+        run: |
+          set -euo pipefail
+          for f in "${INTRO}" "${OUTRO}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Music bed not found in repo: $f"
+              echo "Commit the beds to assets/audio/ or pass explicit paths."
+              exit 1
+            fi
+          done
+          ls -la "${INTRO}" "${OUTRO}"
+
+      - name: Compute the mix timeline
+        id: plan
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plan_mix.py \
+            voice_raw.mp3 \
+            "${{ inputs.intro_bed }}" \
+            "${{ inputs.outro_bed }}" \
+            "${{ inputs.music_lead_out }}" \
+            "${{ inputs.outro_overlap }}" \
+            | tee -a "$GITHUB_OUTPUT"
+
+      - name: Mix (pass 1 - build the unnormalised mix)
+        env:
+          INTRO: ${{ inputs.intro_bed }}
+          OUTRO: ${{ inputs.outro_bed }}
+          FADE_ST: ${{ steps.plan.outputs.fade_st }}
+          VOICE_DELAY_MS: ${{ steps.plan.outputs.voice_delay_ms }}
+          OUTRO_DELAY_MS: ${{ steps.plan.outputs.outro_delay_ms }}
+        run: |
+          set -euo pipefail
+          # aformat on every input: the beds came off a 48k stereo SUNO source and
+          # the voice is 44.1k mono. Mismatched inputs to amix produce silence or
+          # resampling artefacts, so all three are forced to the voice's format.
+          #
+          # normalize=0 on amix: the default divides each input by the input count,
+          # which would drop the whole mix about 9.5dB.
+          #
+          # No loudnorm here - it happens in pass 2, using values measured from
+          # this output. Deliberately an intermediate WAV so the audio is only
+          # lossily encoded once, at the end.
+          ffmpeg -hide_banner -nostdin -y \
+            -i "${INTRO}" \
+            -i voice_raw.mp3 \
+            -i "${OUTRO}" \
+            -filter_complex "[0:a]aformat=sample_rates=44100:channel_layouts=mono,afade=t=out:st=${FADE_ST}:d=1.4[intro];[1:a]aformat=sample_rates=44100:channel_layouts=mono,adelay=${VOICE_DELAY_MS}:all=1[voice];[2:a]aformat=sample_rates=44100:channel_layouts=mono,afade=t=in:st=0:d=0.6,adelay=${OUTRO_DELAY_MS}:all=1[outro];[intro][voice][outro]amix=inputs=3:duration=longest:normalize=0[out]" \
+            -map "[out]" -ar 44100 -ac 1 -c:a pcm_s16le mixed_raw.wav
+          ls -la mixed_raw.wav
+
+      - name: Measure loudness
+        id: loud
+        run: |
+          set -euo pipefail
+          # TWO-PASS loudnorm, matching the house build-cashflow.sh. A single
+          # pass estimates as it goes and drifts 1-2 LU on a long file; pass 1
+          # measures the real values so pass 2 can apply an exact correction.
+          # On a 27-minute episode that difference is audible.
+          measured=$(ffmpeg -hide_banner -nostats -i mixed_raw.wav \
+            -af "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json" \
+            -f null - 2>&1 | sed -n '/^{/,/^}/p')
+          echo "$measured"
+
+          get () { printf '%s' "$measured" | grep "\"$1\"" | sed 's/.*: *"\([^"]*\)".*/\1/'; }
+          M_I=$(get input_i); M_TP=$(get input_tp); M_LRA=$(get input_lra)
+          M_THRESH=$(get input_thresh); M_OFFSET=$(get target_offset)
+
+          for v in "$M_I" "$M_TP" "$M_LRA" "$M_THRESH" "$M_OFFSET"; do
+            if [ -z "$v" ]; then
+              echo "::error::Could not parse the loudnorm measurement. Refusing to guess."
+              exit 1
+            fi
+          done
+
+          {
+            echo "m_i=${M_I}"
+            echo "m_tp=${M_TP}"
+            echo "m_lra=${M_LRA}"
+            echo "m_thresh=${M_THRESH}"
+            echo "m_offset=${M_OFFSET}"
+          } >> "$GITHUB_OUTPUT"
+          echo "measured ${M_I} LUFS, true peak ${M_TP} dBTP, LRA ${M_LRA}"
+
+      - name: Encode (pass 2 - corrected loudness)
+        env:
+          ASSET_ID: ${{ inputs.asset_id }}
+          M_I: ${{ steps.loud.outputs.m_i }}
+          M_TP: ${{ steps.loud.outputs.m_tp }}
+          M_LRA: ${{ steps.loud.outputs.m_lra }}
+          M_THRESH: ${{ steps.loud.outputs.m_thresh }}
+          M_OFFSET: ${{ steps.loud.outputs.m_offset }}
+        run: |
+          set -euo pipefail
+          # linear=true applies one constant gain derived from the measurement,
+          # rather than riding the level dynamically. That preserves the ducking
+          # built in pass 1 - dynamic normalisation would partly undo it.
+          ffmpeg -hide_banner -nostdin -y -i mixed_raw.wav \
+            -af "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=${M_I}:measured_TP=${M_TP}:measured_LRA=${M_LRA}:measured_thresh=${M_THRESH}:offset=${M_OFFSET}:linear=true" \
+            -ar 44100 -ac 1 -b:a 128k -codec:a libmp3lame \
+            -metadata title="${ASSET_ID}" \
+            -metadata artist="Corporate Recovery Partners" \
+            -metadata album="The Cash Flow Show" \
+            -metadata genre="Business" \
+            "${ASSET_ID}_mixed.mp3"
+          ls -la "${ASSET_ID}_mixed.mp3"
+
+      - name: Verify the output
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/verify_mix.py \
+            "${{ inputs.asset_id }}_mixed.mp3" \
+            "${{ steps.plan.outputs.expected }}" \
+            "${{ steps.plan.outputs.voice_delay_ms }}" \
+            "${{ steps.plan.outputs.voice_len }}" \
+            "${{ steps.plan.outputs.outro_delay_ms }}"
+
+      - name: Publish as a release keyed on asset ID
+        env:
+          ASSET_ID: ${{ inputs.asset_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="crp-audio-${ASSET_ID}"
+          # Keyed on asset id, not run id, so the caller fetches its own output by
+          # name. Deleting any prior release of the same tag makes a re-run
+          # idempotent instead of failing on a duplicate tag.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            "${ASSET_ID}_mixed.mp3" \
+            --title "CRP Audio Mix - ${ASSET_ID}" \
+            --notes "Music beds mixed under voice. Loudness -16 LUFS / -1.5 dBTP."
+          echo "Published release $TAG"
+
+      - name: Upload artifact as a fallback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crp-audio-${{ inputs.asset_id }}
+          path: ${{ inputs.asset_id }}_mixed.mp3
+          if-no-files-found: warn
+          retention-days: 14
