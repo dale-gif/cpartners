@@ -15,7 +15,7 @@ on:
       cardSeconds:
         description: 'How long to hold the card on screen'
         required: false
-        default: '0.5'
+        default: '1'
       videoUrl:
         description: 'Optional source video. Blank generates a test clip.'
         required: false
@@ -65,7 +65,7 @@ jobs:
           CARD_SECONDS: ${{ inputs.cardSeconds }}
         run: |
           chmod +x scripts/prepend_title_card.sh
-          scripts/prepend_title_card.sh source.mp4 "${COVER_URL}" "${CARD_SECONDS:-0.5}" out/with-card.mp4
+          scripts/prepend_title_card.sh source.mp4 "${COVER_URL}" "${CARD_SECONDS:-1}" out/with-card.mp4
 
       - name: Extract proof frames
         run: |
