@@ -8,6 +8,9 @@
 #
 # Usage: prepend_title_card.sh <video> <cover-url> <hold-seconds> <output>
 #
+# Hold defaults to 1 second. Larry's call, 26 Aug 2026: long enough that a platform sampling an
+# early frame for its auto-thumbnail is more likely to land on the card.
+#
 # Shared deliberately: render.yml and title-card.yml both call this. The cover engine was
 # duplicated across five workflows once and every fix had to be made five times.
 
@@ -15,7 +18,7 @@ set -euo pipefail
 
 VIDEO="${1:?usage: prepend_title_card.sh <video> <cover-url> <hold-seconds> <output>}"
 COVER_URL="${2:?cover url required}"
-HOLD="${3:-0.5}"
+HOLD="${3:-1}"
 OUT="${4:?output path required}"
 
 WORKDIR="$(mktemp -d)"
