@@ -1,5 +1,11 @@
 name: Cover and Title Card
 
+# Stamp the asset id into the run title. n8n dispatches these and workflow_dispatch does not
+# return a run id, so the poller used to match runs BY TIMESTAMP - which grabbed a different
+# execution's run whenever two backfills overlapped, and published that video under the wrong
+# Notion row. The id in the title makes the match exact.
+run-name: cover-card ${{ inputs.videoId }}
+
 # Two jobs in one: render a CRP cover in Inter, and prepend it to a video as frame one.
 #
 # Used for BACKFILL - reposting videos that were published before the cover system existed - and
