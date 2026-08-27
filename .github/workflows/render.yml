@@ -66,6 +66,9 @@ jobs:
             "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip"
           unzip -q /tmp/inter.zip -d /tmp/inter
           find /tmp/inter -type f -name 'Inter-Regular.ttf'   -exec cp {} fonts/ \;
+          # Inter-Bold is what render_cover.py sets the eyebrow chip in. Without it the
+          # cover step aborts on a missing font.
+          find /tmp/inter -type f -name 'Inter-Bold.ttf'      -exec cp {} fonts/ \;
           find /tmp/inter -type f -name 'Inter-Black.ttf'     -exec cp {} fonts/ \;
           find /tmp/inter -type f -name 'Inter-ExtraBold.ttf' -exec cp {} fonts/ \;
           ls -la fonts/
