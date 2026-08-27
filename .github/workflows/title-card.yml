@@ -138,7 +138,29 @@ jobs:
           mkdir -p out
           if [ -n "${VIDEO_URL}" ]; then
             echo "downloading supplied video"
-            curl -fsSL --retry 3 -o source.mp4 "${VIDEO_URL}"
+            # Google Drive serves a "Virus scan warning" HTML page instead of the bytes for files
+            # over about 100MB, and curl happily saves those 2.4KB as source.mp4 - which then dies
+            # much later as "moov atom not found". Every MF master is ~133MB, so all four failed
+            # that way while the smaller SF clips came through fine. The usercontent host returns
+            # the real file, so rewrite any Drive link to it.
+            FETCH_URL="${VIDEO_URL}"
+            case "${VIDEO_URL}" in
+              *drive.google.com*)
+                DRIVE_ID=$(printf '%s' "${VIDEO_URL}" | sed -n 's/.*[?&]id=\([^&]*\).*/\1/p')
+                if [ -n "${DRIVE_ID}" ]; then
+                  FETCH_URL="https://drive.usercontent.google.com/download?id=${DRIVE_ID}&export=download&confirm=t"
+                  echo "rewrote Drive link to usercontent host (id ${DRIVE_ID})"
+                fi
+                ;;
+            esac
+            curl -fsSL --retry 3 -o source.mp4 "${FETCH_URL}"
+            # Fail HERE, loudly, if what arrived is not a video. Otherwise the real error surfaces
+            # three steps later inside ffmpeg with no clue what caused it.
+            if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 source.mp4 | grep -q video; then
+              echo "::error::downloaded file is not a video ($(stat -c%s source.mp4) bytes) - first bytes follow"
+              head -c 200 source.mp4 || true
+              exit 1
+            fi
           else
             SIZE="${CLIP_SIZE:-1080x1920}"
             echo "generating a 5s ${SIZE} test clip"
