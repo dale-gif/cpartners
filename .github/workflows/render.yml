@@ -13,9 +13,29 @@ on:
         required: true
         default: manual-test
       coverUrl:
-        description: 'Public URL of the 9:16 cover PNG. Blank = no title card.'
+        description: 'Pre-rendered cover PNG URL. Leave blank and supply coverPlateUrl instead.'
         required: false
         default: ''
+      coverPlateUrl:
+        description: 'Base plate URL. Supply this and the cover is rendered HERE, in Inter.'
+        required: false
+        default: ''
+      coverHeadline:
+        description: 'Cover headline, ALL CAPS, two words is house style'
+        required: false
+        default: ''
+      coverEyebrow:
+        description: 'Cover category label'
+        required: false
+        default: ''
+      coverBody:
+        description: 'Cover sub-header, one plain sentence'
+        required: false
+        default: ''
+      coverTemplate:
+        description: 'T1 Hook / T2 Problem / T3 Solution / T5 Authority'
+        required: false
+        default: 'T2'
       cardSeconds:
         description: 'How long to hold the title card as frame one'
         required: false
@@ -66,6 +86,34 @@ jobs:
           FONT_DIR: fonts
         run: python render_job.py
 
+      # Draw the cover HERE rather than in n8n. n8n Cloud carries only the MS core fonts and
+      # cannot have any installed, which capped covers at Arial Black. This runner already has
+      # Inter, so the covers and the on-screen video text finally share one typeface. Swapping to
+      # a licensed Sohne later is a font-dir change, nothing more.
+      - name: Render cover
+        id: cover
+        env:
+          PLATE:    ${{ github.event.client_payload.coverPlateUrl || inputs.coverPlateUrl }}
+          HEADLINE: ${{ github.event.client_payload.coverHeadline || inputs.coverHeadline }}
+          EYEBROW:  ${{ github.event.client_payload.coverEyebrow  || inputs.coverEyebrow }}
+          BODY:     ${{ github.event.client_payload.coverBody     || inputs.coverBody }}
+          TEMPLATE: ${{ github.event.client_payload.coverTemplate || inputs.coverTemplate }}
+          VIDEO_ID: ${{ github.event.client_payload.videoId || inputs.videoId }}
+        run: |
+          mkdir -p out
+          if [ -z "${PLATE:-}" ]; then
+            echo "No coverPlateUrl - skipping cover render."
+            exit 0
+          fi
+          if [ -z "${HEADLINE:-}" ]; then
+            echo "coverPlateUrl supplied but no coverHeadline - refusing to render a blank cover." >&2
+            exit 1
+          fi
+          OUT="out/${VIDEO_ID}_CRP_COVER.png"
+          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --font-dir fonts
+          echo "cover_path=${OUT}" >> $GITHUB_OUTPUT
+          echo "Rendered ${OUT}"
+
       # Frame one. Holds the CRP cover at the very start of the video so a platform that will
       # not take an uploaded cover file still opens on branded artwork. No coverUrl in the
       # payload means this is a no-op and the video is published exactly as before.
@@ -75,8 +123,14 @@ jobs:
           CARD_SECONDS: ${{ github.event.client_payload.cardSeconds || inputs.cardSeconds }}
           TARGET:       ${{ steps.render.outputs.output_path }}
         run: |
+          # A cover rendered in this run wins over a pre-rendered URL.
+          LOCAL="${{ steps.cover.outputs.cover_path }}"
+          if [ -n "${LOCAL:-}" ] && [ -f "${LOCAL}" ]; then
+            COVER_URL="${LOCAL}"
+            echo "Using the cover rendered in this run: ${LOCAL}"
+          fi
           if [ -z "${COVER_URL:-}" ]; then
-            echo "No coverUrl supplied - skipping title card, publishing video unchanged."
+            echo "No cover supplied - skipping title card, publishing video unchanged."
             exit 0
           fi
           if [ -z "${TARGET:-}" ] || [ ! -f "${TARGET}" ]; then
