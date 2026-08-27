@@ -16,6 +16,7 @@ width table here - that table only existed because ImageMagick inside n8n could 
 import argparse
 import io
 import os
+import re
 import sys
 import urllib.request
 
@@ -67,10 +68,27 @@ def snap_to_master(im):
     return im.crop((x, y, x + tw, y + th)), True
 
 
+def drive_direct(url):
+    """Rewrite a Drive share link onto the usercontent host.
+
+    drive.google.com/uc?export=download answers with a "Virus scan warning" HTML page instead of
+    the bytes once a file passes ~100MB. Plates are small enough today that the old host works,
+    but it cost us four MF renders on the video path, so nothing here relies on it either.
+    """
+    if "drive.google.com" not in url:
+        return url
+    m = re.search(r"[?&]id=([^&]+)", url)
+    if not m:
+        return url
+    return ("https://drive.usercontent.google.com/download?id=%s&export=download&confirm=t"
+            % m.group(1))
+
+
 def fetch(src, timeout=60):
     """Load the plate from a local path or a URL."""
     if os.path.exists(src):
         return Image.open(src).convert("RGB")
+    src = drive_direct(src)
     req = urllib.request.Request(src, headers={"User-Agent": "crp-cover/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = r.read()
