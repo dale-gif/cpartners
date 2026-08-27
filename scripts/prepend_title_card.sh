@@ -24,11 +24,17 @@ OUT="${4:?output path required}"
 WORKDIR="$(mktemp -d)"
 CARD="$WORKDIR/card.png"
 
-echo "[title-card] fetching cover"
-# Drive's uc?export=download can answer with an HTML interstitial rather than bytes, so follow
-# redirects and then VERIFY we got an image. Handing ffmpeg an HTML page would either fail
-# cryptically or, worse, produce a video we then publish.
-curl -fsSL --retry 3 --retry-delay 2 -o "$CARD" "$COVER_URL"
+# The cover may be a local file (rendered earlier in this same job) or a URL.
+if [ -f "$COVER_URL" ]; then
+  echo "[title-card] using local cover: $COVER_URL"
+  cp "$COVER_URL" "$CARD"
+else
+  echo "[title-card] fetching cover"
+  # Drive's uc?export=download can answer with an HTML interstitial rather than bytes, so follow
+  # redirects and then VERIFY we got an image. Handing ffmpeg an HTML page would either fail
+  # cryptically or, worse, produce a video we then publish.
+  curl -fsSL --retry 3 --retry-delay 2 -o "$CARD" "$COVER_URL"
+fi
 
 MIME="$(file -b --mime-type "$CARD")"
 case "$MIME" in
