@@ -1,5 +1,9 @@
 name: CRP MF LF Render
 
+# Asset id in the run title so the n8n poller can match this exact run rather than guessing
+# from the dispatch timestamp. See the note in title-card.yml.
+run-name: crp-render ${{ github.event.client_payload.videoId }}
+
 on:
   repository_dispatch:
     types: [crp-render]
