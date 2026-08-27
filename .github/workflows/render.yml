@@ -12,6 +12,14 @@ on:
         description: 'Video / asset id (used in output filename)'
         required: true
         default: manual-test
+      coverUrl:
+        description: 'Public URL of the 9:16 cover PNG. Blank = no title card.'
+        required: false
+        default: ''
+      cardSeconds:
+        description: 'How long to hold the title card as frame one'
+        required: false
+        default: '1'
 
 permissions:
   contents: write   # required for softprops/action-gh-release
@@ -57,6 +65,28 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FONT_DIR: fonts
         run: python render_job.py
+
+      # Frame one. Holds the CRP cover at the very start of the video so a platform that will
+      # not take an uploaded cover file still opens on branded artwork. No coverUrl in the
+      # payload means this is a no-op and the video is published exactly as before.
+      - name: Prepend title card (frame one)
+        env:
+          COVER_URL:    ${{ github.event.client_payload.coverUrl || inputs.coverUrl }}
+          CARD_SECONDS: ${{ github.event.client_payload.cardSeconds || inputs.cardSeconds }}
+          TARGET:       ${{ steps.render.outputs.output_path }}
+        run: |
+          if [ -z "${COVER_URL:-}" ]; then
+            echo "No coverUrl supplied - skipping title card, publishing video unchanged."
+            exit 0
+          fi
+          if [ -z "${TARGET:-}" ] || [ ! -f "${TARGET}" ]; then
+            echo "Render produced no output_path - nothing to prepend to." >&2
+            exit 1
+          fi
+          chmod +x scripts/prepend_title_card.sh
+          scripts/prepend_title_card.sh "${TARGET}" "${COVER_URL}" "${CARD_SECONDS:-1}" "${TARGET%.mp4}__carded.mp4"
+          mv "${TARGET%.mp4}__carded.mp4" "${TARGET}"
+          echo "Title card baked into ${TARGET}"
 
       - name: Bundle debug assets
         if: always()
