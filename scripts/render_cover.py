@@ -40,6 +40,33 @@ TEMPLATES = {
 }
 
 
+# The five master sizes from the brand guide. A plate is snapped to whichever it matches, so a
+# cover is always spec size regardless of what the designer exported at.
+MASTERS = [(1080, 1920), (1080, 1350), (1080, 1080), (1920, 1080), (1000, 1500)]
+
+
+def snap_to_master(im):
+    """Cover-fit the plate to its nearest master size.
+
+    Plates arrive at whatever the designer exported - Lisa's 16:9 is 1672x941, Stacy's 9:16 is
+    1080x1920. Without this the cover inherits the plate's size, so thumbnails vary per presenter.
+    Scale to FILL then crop; never squash. On a plate already at master size this is a no-op.
+    """
+    W, H = im.size
+    aspect = W / float(H)
+    tw, th = min(MASTERS, key=lambda m: abs((m[0] / float(m[1])) - aspect))
+    if (W, H) == (tw, th):
+        return im, False
+    scale = max(tw / float(W), th / float(H))
+    fw = max(tw, int(round(W * scale)))
+    fh = max(th, int(round(H * scale)))
+    im = im.resize((fw, fh), Image.LANCZOS)
+    # Bias the vertical crop up - heads live in the top of the frame.
+    x = max(0, min(fw - tw, int(round((fw - tw) * 0.5))))
+    y = max(0, min(fh - th, int(round((fh - th) * 0.15))))
+    return im.crop((x, y, x + tw, y + th)), True
+
+
 def fetch(src, timeout=60):
     """Load the plate from a local path or a URL."""
     if os.path.exists(src):
@@ -248,6 +275,9 @@ def main():
     print("[cover] plate: %s" % a.plate)
     plate = fetch(a.plate)
     print("[cover] plate loaded %dx%d" % plate.size)
+    plate, resized = snap_to_master(plate)
+    if resized:
+        print("[cover] snapped to master %dx%d" % plate.size)
     info = render(
         plate, a.headline.strip(), a.eyebrow.strip(), a.body.strip(),
         a.template.strip().upper(), fonts, a.out,
