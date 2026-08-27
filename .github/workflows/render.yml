@@ -73,6 +73,20 @@ jobs:
           find /tmp/inter -type f -name 'Inter-ExtraBold.ttf' -exec cp {} fonts/ \;
           ls -la fonts/
 
+      # Sohne is the brand face. It is a LICENSED font and is NOT in this repo - the receipt on
+      # file is a 5-user DESKTOP licence, which does not obviously cover an automated build
+      # runner. Once that is settled, drop Sohne-Extrafett/Halbfett/Buch into brand-fonts/ and
+      # render_cover.py picks them up on its own. Until then this copies nothing and the render
+      # falls back to Inter, so the pipeline never breaks either way.
+      - name: Install brand fonts (if licensed and present)
+        run: |
+          if [ -d brand-fonts ]; then
+            cp brand-fonts/*.otf brand-fonts/*.ttf fonts/ 2>/dev/null || true
+            echo "brand fonts deployed:"; ls -la fonts/
+          else
+            echo "no brand-fonts/ in repo - rendering in Inter"
+          fi
+
       - name: Install Python deps
         run: |
           pip install --no-cache-dir \
