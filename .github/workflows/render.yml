@@ -73,19 +73,45 @@ jobs:
           find /tmp/inter -type f -name 'Inter-ExtraBold.ttf' -exec cp {} fonts/ \;
           ls -la fonts/
 
-      # Sohne is the brand face. It is a LICENSED font and is NOT in this repo - the receipt on
-      # file is a 5-user DESKTOP licence, which does not obviously cover an automated build
-      # runner. Once that is settled, drop Sohne-Extrafett/Halbfett/Buch into brand-fonts/ and
-      # render_cover.py picks them up on its own. Until then this copies nothing and the render
-      # falls back to Inter, so the pipeline never breaks either way.
-      - name: Install brand fonts (if licensed and present)
+      # Sohne is the brand face and is LICENSED, so it is deliberately NOT committed here - THIS
+      # REPO IS PUBLIC and committing it would publish the family to anyone who looks. The weights
+      # live in the private repo dale-gif/crp-brand-fonts and are pulled in at build time with a
+      # token. If the fetch fails for any reason the render falls back to Inter rather than dying
+      # halfway through a job.
+      - name: Fetch licensed brand fonts
+        env:
+          BRAND_FONTS_TOKEN: ${{ secrets.BRAND_FONTS_TOKEN }}
         run: |
-          if [ -d brand-fonts ]; then
-            cp brand-fonts/*.otf brand-fonts/*.ttf fonts/ 2>/dev/null || true
-            echo "brand fonts deployed:"; ls -la fonts/
-          else
-            echo "no brand-fonts/ in repo - rendering in Inter"
+          if [ -z "${BRAND_FONTS_TOKEN}" ]; then
+            echo "no BRAND_FONTS_TOKEN set - rendering in Inter"
+            exit 0
           fi
+          API="https://api.github.com/repos/dale-gif/crp-brand-fonts/contents"
+          AUTH="Authorization: token ${BRAND_FONTS_TOKEN}"
+          ACCEPT="Accept: application/vnd.github.raw"
+          ok=0
+          for f in Sohne-Extrafett.otf Sohne-Halbfett.otf Sohne-Buch.otf; do
+            if curl -fsSL -H "$AUTH" -H "$ACCEPT" -o "fonts/$f" "$API/$f?ref=main"; then
+              sz=$(stat -c%s "fonts/$f")
+            else
+              sz=0
+            fi
+            # A truncated file or an API error page would sail past curl as a "success" and then
+            # blow up inside PIL, so check it is actually font-sized before counting it.
+            if [ "$sz" -gt 10000 ]; then
+              ok=$((ok + 1))
+            else
+              echo "could not fetch $f (got ${sz} bytes)"
+              rm -f "fonts/$f"
+            fi
+          done
+          # A partial family is worse than none: render_cover.py wants all three or it falls back,
+          # and a Sohne headline over Inter body text looks like a mistake rather than a brand.
+          if [ "$ok" -ne 3 ]; then
+            echo "only $ok/3 brand fonts fetched - dropping them, will render in Inter"
+            rm -f fonts/Sohne-*.otf
+          fi
+          ls -la fonts/
 
       - name: Install Python deps
         run: |
