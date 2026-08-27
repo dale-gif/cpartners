@@ -131,7 +131,10 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
     el = TEMPLATES.get(template, TEMPLATES["T1"])
     show_eyebrow = el["eyebrow"] and bool(eyebrow)
     show_body = el["body"] and bool(body)
-    show_rule = el["rule"]
+    # The rule is a SEPARATOR, so it only earns its place when there is something under it to
+    # separate. Without this gate a sub-header dropped upstream leaves a stray dash hanging below
+    # the headline, which reads as a broken render rather than a deliberate headline-only cover.
+    show_rule = el["rule"] and show_body
 
     # Geometry. Portrait is measured off the approved 9:16 reference, not derived from landscape.
     # The bottom band is RESERVED for the lockup baked into the plate.
