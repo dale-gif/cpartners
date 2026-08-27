@@ -1,27 +1,54 @@
-name: Title Card Test
+name: Cover and Title Card
 
-# Proves the frame-one title card end to end WITHOUT running the full render (no Whisper, no
-# Claude planner, no OpusClip URL). Give it a cover URL; it prepends the card, then extracts
-# frame zero and a frame from after the card so you can see both.
+# Two jobs in one: render a CRP cover in Inter, and prepend it to a video as frame one.
 #
-# Same script render.yml uses, so a pass here means a pass there.
+# Used for BACKFILL - reposting videos that were published before the cover system existed - and
+# as a fast test harness that skips Whisper, the Claude planner and OpusClip entirely.
+#
+# Uses the same scripts/render_cover.py and scripts/prepend_title_card.sh as render.yml, so the
+# live path and the backfill path can never drift apart.
 
 on:
   workflow_dispatch:
     inputs:
-      coverUrl:
-        description: 'Public URL of the cover PNG (9:16). Must be anyone-with-link.'
-        required: true
-      cardSeconds:
-        description: 'How long to hold the card on screen'
-        required: false
-        default: '1'
       videoUrl:
-        description: 'Optional source video. Blank generates a test clip.'
+        description: 'Video to put the card on. Blank generates a test clip.'
         required: false
         default: ''
+      videoId:
+        description: 'Asset id, used to name the outputs'
+        required: true
+        default: manual-test
+      coverPlateUrl:
+        description: 'Base plate URL. Required unless you pass coverUrl.'
+        required: false
+        default: ''
+      coverUrl:
+        description: 'A pre-rendered cover, if you already have one'
+        required: false
+        default: ''
+      coverHeadline:
+        description: 'Headline, ALL CAPS. Two words is house style.'
+        required: false
+        default: ''
+      coverEyebrow:
+        description: 'Category label'
+        required: false
+        default: ''
+      coverBody:
+        description: 'Sub-header, one plain sentence'
+        required: false
+        default: ''
+      coverTemplate:
+        description: 'T1 Hook / T2 Problem / T3 Solution / T5 Authority'
+        required: false
+        default: 'T2'
+      cardSeconds:
+        description: 'How long the card is held'
+        required: false
+        default: '1'
       testClipSize:
-        description: 'Generated test clip size. 1920x1080 for MF landscape, 1080x1920 for short-form.'
+        description: 'Size of the generated test clip if no videoUrl'
         required: false
         default: '1080x1920'
 
@@ -29,62 +56,103 @@ permissions:
   contents: write
 
 jobs:
-  title-card:
+  cover-and-card:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      - name: Install Pillow
+        run: pip install --no-cache-dir pillow==10.4.0
+
+      - name: Install Inter font
+        run: |
+          mkdir -p fonts
+          curl -fsSL -o /tmp/inter.zip             "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip"
+          unzip -q /tmp/inter.zip -d /tmp/inter
+          find /tmp/inter -type f -name 'Inter-Regular.ttf' -exec cp {} fonts/ \;
+          find /tmp/inter -type f -name 'Inter-Bold.ttf'    -exec cp {} fonts/ \;
+          find /tmp/inter -type f -name 'Inter-Black.ttf'   -exec cp {} fonts/ \;
+          ls -la fonts/
+
       # Inputs go through env, never interpolated straight into the shell.
-      - name: Get or generate a source video
+      - name: Get or generate the source video
         env:
           VIDEO_URL: ${{ inputs.videoUrl }}
           CLIP_SIZE: ${{ inputs.testClipSize }}
         run: |
           mkdir -p out
           if [ -n "${VIDEO_URL}" ]; then
-            echo "using supplied video"
+            echo "downloading supplied video"
             curl -fsSL --retry 3 -o source.mp4 "${VIDEO_URL}"
           else
             SIZE="${CLIP_SIZE:-1080x1920}"
             echo "generating a 5s ${SIZE} test clip"
-            ffmpeg -y -v warning \
-              -f lavfi -i "testsrc=size=${SIZE}:rate=30:duration=5" \
-              -f lavfi -i "sine=frequency=440:duration=5" \
-              -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest source.mp4
+            ffmpeg -y -v warning               -f lavfi -i "testsrc=size=${SIZE}:rate=30:duration=5"               -f lavfi -i "sine=frequency=440:duration=5"               -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest source.mp4
           fi
           ffprobe -v error -show_entries format=duration -of csv=p=0 source.mp4
+
+      - name: Render cover
+        id: cover
+        env:
+          PLATE:    ${{ inputs.coverPlateUrl }}
+          HEADLINE: ${{ inputs.coverHeadline }}
+          EYEBROW:  ${{ inputs.coverEyebrow }}
+          BODY:     ${{ inputs.coverBody }}
+          TEMPLATE: ${{ inputs.coverTemplate }}
+          VIDEO_ID: ${{ inputs.videoId }}
+        run: |
+          if [ -z "${PLATE:-}" ]; then
+            echo "No coverPlateUrl - expecting a pre-rendered coverUrl instead."
+            exit 0
+          fi
+          OUT="out/${VIDEO_ID}_CRP_COVER.png"
+          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --font-dir fonts
+          echo "cover_path=${OUT}" >> $GITHUB_OUTPUT
 
       - name: Prepend title card
         env:
           COVER_URL:    ${{ inputs.coverUrl }}
           CARD_SECONDS: ${{ inputs.cardSeconds }}
+          VIDEO_ID:     ${{ inputs.videoId }}
         run: |
+          LOCAL="${{ steps.cover.outputs.cover_path }}"
+          if [ -n "${LOCAL:-}" ] && [ -f "${LOCAL}" ]; then
+            COVER_URL="${LOCAL}"
+          fi
+          if [ -z "${COVER_URL:-}" ]; then
+            echo "No cover to apply - supply coverPlateUrl or coverUrl." >&2
+            exit 1
+          fi
           chmod +x scripts/prepend_title_card.sh
-          scripts/prepend_title_card.sh source.mp4 "${COVER_URL}" "${CARD_SECONDS:-1}" out/with-card.mp4
+          scripts/prepend_title_card.sh source.mp4 "${COVER_URL}" "${CARD_SECONDS:-1}"             "out/${VIDEO_ID}_CARDED.mp4"
 
-      - name: Extract proof frames
+      - name: Proof frames
+        env:
+          VIDEO_ID: ${{ inputs.videoId }}
         run: |
           # Frame zero is what a platform sees if it takes the very first frame.
-          ffmpeg -y -v warning -i out/with-card.mp4 -vf "select=eq(n\,0)" -vframes 1 out/frame-000.png
-          # Well after the card, to prove the original video is still intact behind it.
-          ffmpeg -y -v warning -ss 2.0 -i out/with-card.mp4 -vframes 1 out/frame-at-2s.png
-          echo "### Title card test" >> $GITHUB_STEP_SUMMARY
-          echo "- source duration: $(ffprobe -v error -show_entries format=duration -of csv=p=0 source.mp4)s" >> $GITHUB_STEP_SUMMARY
-          echo "- output duration: $(ffprobe -v error -show_entries format=duration -of csv=p=0 out/with-card.mp4)s" >> $GITHUB_STEP_SUMMARY
+          ffmpeg -y -v warning -i "out/${VIDEO_ID}_CARDED.mp4" -vf "select=eq(n\,0)" -vframes 1 out/frame-000.png
+          echo "### Cover and title card" >> $GITHUB_STEP_SUMMARY
+          echo "- source:  $(ffprobe -v error -show_entries format=duration -of csv=p=0 source.mp4)s" >> $GITHUB_STEP_SUMMARY
+          echo "- output:  $(ffprobe -v error -show_entries format=duration -of csv=p=0 out/${VIDEO_ID}_CARDED.mp4)s" >> $GITHUB_STEP_SUMMARY
           echo "- card held: ${{ inputs.cardSeconds }}s" >> $GITHUB_STEP_SUMMARY
 
-      - name: Publish result
+      - name: Publish
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: title-card-test-${{ github.run_id }}
-          name: Title card test ${{ github.run_id }}
-          body: 'Frame-one title card test. with-card.mp4 plus frame-000.png (what a platform sees) and frame-at-2s.png (video intact behind it).'
+          tag_name: cover-card-${{ github.run_id }}
+          name: Cover and card ${{ inputs.videoId }}
+          body: 'Cover rendered in Inter and baked in as frame one.'
           files: |
-            out/with-card.mp4
+            out/*.mp4
             out/*.png
           fail_on_unmatched_files: false
