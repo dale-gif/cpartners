@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 """
-Build one finished CRP episode: sung-hook intro, the voice, and a ducked outro bed
-that swells onto the hook after the last word.
+Build one finished CRP episode: theme intro, the voice, and a ducked outro bed that
+swells when she stops and then plays the track out to its own ending.
 
-Everything here was derived from a real 4:39 episode and a 47.4s theme, and each
-decision below replaced something that measured wrong. Read the notes before
-changing a number.
+Every decision below replaced something that measured wrong on a real 4:39 episode.
+Read the notes before changing a number.
 
 Usage:
     mix_episode.py --voice VOICE.mp3 --theme THEME.mp3 --out OUT.mp3 --asset-id ID
-                   [--hook-at 14.96] [--intro-from 28.5] [--intro-len 16]
-                   [--outro-lead-in 9.0] [--hook-delay 10.0] [--headroom 12.0]
+                   [--hook-at 139] [--intro-from 0] [--intro-len 16]
+                   [--outro-lead-in 9.0] [--hook-delay 9.0] [--headroom 12.0]
 
 Timeline it produces:
 
     0                    intro bed starts (theme --intro-from)
-    intro_len-2.6        bed eases down under the episode's own opening
+    intro_len-4.4        bed eases down under the episode's own opening
     intro_lead           the voice starts
     ...
     speech_end - 9.0     outro bed enters, ducked well under her voice
     speech_end           bed swells over 1.5s
-    speech_end + 1.0     the sung hook lands
-    ...                  dB-linear fade to silence
+    ...                  the track plays out and resolves on its own
+
+The bed level is NOT a fixed fraction - it is computed from the measured level of
+both the theme and her voice, so swapping the theme retunes the duck automatically.
+That mattered when the 47.4s cut was replaced by the 151.88s remaster: the remaster
+sits about 2.5 dB quieter in the outro region, and the duck followed it without
+anyone touching a number.
 """
 import argparse
 import json
@@ -146,19 +150,29 @@ def main():
     ap.add_argument('--theme', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--asset-id', required=True)
-    ap.add_argument('--hook-at', type=float, default=14.96,
-                    help='where the sung hook starts in the theme')
-    ap.add_argument('--intro-from', type=float, default=28.5)
+    # Defaults are tuned to the REMASTERED theme (151.88s, instrumental).
+    # Its shape: full energy 0-56s, a breakdown around 60-68s, full again to
+    # ~140s, then it winds down and resolves on its own by 151.88s.
+    #
+    # The earlier 47.4s cut had a SUNG hook at 14.96s and these numbers were
+    # built around landing on it. The remaster has no hook, so the outro now
+    # ends on the track's own resolution instead - the episode finishes when the
+    # song finishes, which is better than fading over a crescendo.
+    ap.add_argument('--hook-at', type=float, default=139.0,
+                    help='the musical moment the swell should land on')
+    ap.add_argument('--intro-from', type=float, default=0.0)
     ap.add_argument('--intro-len', type=float, default=16.0)
     ap.add_argument('--intro-lead', type=float, default=13.4,
                     help='seconds of intro before the voice starts')
     ap.add_argument('--outro-lead-in', type=float, default=9.0)
-    ap.add_argument('--hook-delay', type=float, default=10.0,
-                    help='seconds from bed start to the hook landing')
-    ap.add_argument('--outro-len', type=float, default=18.5)
+    ap.add_argument('--hook-delay', type=float, default=9.0,
+                    help='seconds from bed start to that moment landing')
+    ap.add_argument('--outro-len', type=float, default=21.88)
     ap.add_argument('--headroom', type=float, default=12.0)
-    ap.add_argument('--fade-start', type=float, default=14.5)
-    ap.add_argument('--fade-len', type=float, default=4.0)
+    # Fade is only a tidy-up at the very end - the track resolves by itself, so a
+    # long fade would talk over an ending the composer already wrote.
+    ap.add_argument('--fade-start', type=float, default=20.0)
+    ap.add_argument('--fade-len', type=float, default=1.9)
     a = ap.parse_args()
 
     v_len = duration(a.voice)
