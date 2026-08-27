@@ -119,6 +119,37 @@ def cap_height(font):
     return bb[3] - bb[1]
 
 
+# Typeface sets, in order of preference. Sohne is the brand face but is a LICENSED font that only
+# ships to the runner once the licence covers it; Inter is the metric-compatible stand-in. Keeping
+# both here means deploying Sohne is a matter of dropping the files in, with no code change - and
+# if they are ever absent the render falls back rather than dying mid-pipeline.
+FONT_SETS = {
+    "sohne": {"head": "Sohne-Extrafett", "chip": "Sohne-Halbfett", "body": "Sohne-Buch"},
+    "inter": {"head": "Inter-Black", "chip": "Inter-Bold", "body": "Inter-Regular"},
+}
+FONT_ORDER = ["sohne", "inter"]
+
+
+def resolve_fonts(font_dir, want="auto"):
+    """Return (role -> path, name) for the first COMPLETE set found. A half-deployed family is
+    skipped entirely - mixing Sohne headlines with Inter body text is worse than either alone."""
+    names = FONT_ORDER if want == "auto" else [want]
+    for name in names:
+        found = {}
+        for role, stem in FONT_SETS[name].items():
+            for ext in (".otf", ".ttf"):
+                cand = os.path.join(font_dir, stem + ext)
+                if os.path.exists(cand):
+                    found[role] = cand
+                    break
+        if len(found) == 3:
+            return found, name
+        if found:
+            print("[cover] %s is incomplete (%d/3 weights), skipping"
+                  % (name, len(found)), file=sys.stderr)
+    return None, None
+
+
 def render(plate, headline, eyebrow, body, template, fonts, out_path):
     im = plate
     W, H = im.size
@@ -262,18 +293,15 @@ def main():
     p.add_argument("--body", default="")
     p.add_argument("--template", default="T2")
     p.add_argument("--font-dir", default="fonts")
+    p.add_argument("--font-set", default="auto", choices=["auto"] + list(FONT_SETS),
+                   help="auto prefers Sohne when it is deployed, else falls back to Inter")
     a = p.parse_args()
 
-    fd = a.font_dir
-    fonts = dict(
-        head=os.path.join(fd, "Inter-Black.ttf"),
-        chip=os.path.join(fd, "Inter-Bold.ttf"),
-        body=os.path.join(fd, "Inter-Regular.ttf"),
-    )
-    for k, v in fonts.items():
-        if not os.path.exists(v):
-            print("[cover] FATAL: missing %s font -> %s" % (k, v), file=sys.stderr)
-            return 2
+    fonts, face = resolve_fonts(a.font_dir, a.font_set)
+    if fonts is None:
+        print("[cover] FATAL: no complete font set in %s" % a.font_dir, file=sys.stderr)
+        return 2
+    print("[cover] typeface: %s" % face)
 
     print("[cover] plate: %s" % a.plate)
     plate = fetch(a.plate)
