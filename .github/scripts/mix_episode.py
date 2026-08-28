@@ -14,18 +14,22 @@ Usage:
 Timeline it produces:
 
     0                    intro bed starts (theme --intro-from)
-    intro_len-4.4        bed eases down under the episode's own opening
-    intro_lead           the voice starts
+    intro_hold           33s of music at full, then a raised-cosine blend down
+    intro_lead           the voice starts, 1.5s into that blend, music still up
+    intro_hold+blend     bed has settled to the ducked level under her
     ...
     speech_end - 9.0     outro bed enters, ducked well under her voice
-    speech_end           bed swells over 1.5s
-    ...                  the track plays out and resolves on its own
+    speech_end           bed swells over 1.5s and the song takes the room
+    +83s                 the sung "cash flow ... situation room" chorus lands
+    +110s                fade begins (Larry's 1:50), constant dB per second
+    +122.8s              fade complete, in the gap before the next verse
 
 The bed level is NOT a fixed fraction - it is computed from the measured level of
 both the theme and her voice, so swapping the theme retunes the duck automatically.
-That mattered when the 47.4s cut was replaced by the 151.88s remaster: the remaster
-sits about 2.5 dB quieter in the outro region, and the duck followed it without
-anyone touching a number.
+That has now paid off twice: first when the 47.4s cut became the 151.88s instrumental
+remaster, and again on 2026-08-28 when Larry replaced that with the 197.4s Suno track
+carrying the sung "Cash Flow Show / Situation Room" lyric. Each track sits at a
+different level and the duck followed without anyone touching a number.
 """
 import argparse
 import json
@@ -158,34 +162,74 @@ def main():
     # built around landing on it. The remaster has no hook, so the outro now
     # ends on the track's own resolution instead - the episode finishes when the
     # song finishes, which is better than fading over a crescendo.
-    # LARRY'S SPEC, 2026-08-27, against the Suno track (197.4s, lyric from 0.00s):
+    # LARRY'S SPEC, 2026-08-28, against the Suno track now in assets/audio/:
     #   "Intro: run for 33 seconds and start to fade into speech"
-    #   "Outro: run for 1:50 and start to fade before the next verse at 2:03"
+    #   "Outro: run at 1:50 and start to fade before the next verse at 2:03"
     #   "run the song for at least a full minute at the end"
     #   "apply better audio fading and transition from song to speech, speech to song"
-    # The verse he means starts at 123.46s, so the fade completes before it.
-    # Outro bed is the track from 0.00s, which is why hook-at equals hook-delay.
+    #
+    # MEASURED STRUCTURE of that track (197.40s), from a word-level transcription -
+    # every number below is anchored to one of these, not to taste:
+    #   0.00 - 52.9   instrumental build, no vocal
+    #   52.9          verse 1, "Big screens flash, green numbers rise and fall"
+    #   83.2          the chorus Larry wants, "The cash flow ... in the situation room"
+    #   121.10-122.78 chorus tail, "in this situation,"
+    #   123.56        VERSE 2, "Big talk, big threats, big stacks on the line"
+    #                 <- this is his "next verse at 2:03". He was right to 0.5s.
+    #   197.40        end
+    #
+    # So the outro bed is the track from 0.00s - which is why hook-at equals
+    # hook-delay - and it runs long enough to reach the chorus at 83.2s before
+    # fading out in the 0.78s gap ahead of verse 2. That is 114s of music after
+    # her last word, comfortably past his "at least a full minute".
+    #
+    # THE INTRO STARTS AT 79.6s, NOT 0. Larry asked for two things at once:
+    #   "use the correct song that features the cash flow show lyrics EARLY"
+    #   "intro: run for 33 seconds and start to fade into speech"
+    # An intro taken from 0.00 satisfies the second and fails the first - the track
+    # is instrumental until 52.9s, so 33 seconds from the top has no vocal in it.
+    # Starting at 79.64s satisfies both: that is the downbeat of the pre-chorus line
+    # "cuz it all goes down in the situation", and the sung "The cash flow show"
+    # lands at 82.40s - 2.8 SECONDS INTO THE EPISODE - with the hook then repeating
+    # four times inside the 33 seconds. Rounded to 79.6 to enter just before the
+    # vocal rather than clipping its first consonant.
+    #
+    # 79.64 is a vocal downbeat, not a silence, so the bed eases in over
+    # --intro-fade-in rather than cutting. A cut here clicks; 0.5s was audible as a
+    # bump on the very first sound of the show, which is the worst place for one.
     ap.add_argument('--hook-at', type=float, default=9.0,
                     help='musical moment the swell lands on; minus hook-delay gives the bed trim point')
-    ap.add_argument('--intro-from', type=float, default=0.0)
+    ap.add_argument('--intro-from', type=float, default=79.6,
+                    help='theme offset the intro enters on - the pre-chorus lead-in')
+    ap.add_argument('--intro-fade-in', type=float, default=0.8,
+                    help='ease-in on the first sound of the episode, since 79.6s is mid-track')
     ap.add_argument('--intro-hold', type=float, default=33.0,
                     help="seconds of music at full before the blend starts - Larry's 33")
     ap.add_argument('--intro-blend', type=float, default=6.0,
                     help='length of the ramp from full down to the ducked bed')
-    ap.add_argument('--intro-len', type=float, default=47.0)
+    # 79.6 + 43.5 = 123.1s, which stops the intro bed short of verse 2 at 123.56s.
+    # The old 47.0 would have run it to 126.6 and pulled the first line of that verse
+    # in under her opening words. The --verse-at guard below enforces this.
+    ap.add_argument('--intro-len', type=float, default=43.5)
     ap.add_argument('--intro-lead', type=float, default=34.5,
                     help='seconds of intro before the voice starts')
     ap.add_argument('--outro-lead-in', type=float, default=9.0)
     ap.add_argument('--hook-delay', type=float, default=9.0,
                     help='seconds from bed start to that moment landing')
-    ap.add_argument('--outro-len', type=float, default=123.46)
+    ap.add_argument('--outro-len', type=float, default=123.0,
+                    help='bed is silent well before this, but it never reaches verse 2')
     ap.add_argument('--headroom', type=float, default=12.0)
-    # Fade is only a tidy-up at the very end - the track resolves by itself, so a
-    # long fade would talk over an ending the composer already wrote.
     ap.add_argument('--fade-start', type=float, default=110.0,
                     help="Larry's 1:50 - where the outro fade begins")
-    ap.add_argument('--fade-len', type=float, default=13.4,
-                    help='completes at 123.4s, immediately before the 2:03 verse')
+    ap.add_argument('--fade-len', type=float, default=12.8,
+                    help='completes at 122.8s, in the gap before the 123.56s verse')
+    # The fade must be FINISHED before the next verse begins, otherwise the episode
+    # ends on a half-faded new vocal - the exact thing Larry asked to avoid. This is
+    # the measured onset of "Big talk, big threats", not an estimate, and it is
+    # asserted below instead of being left as a comment somebody can drift away from.
+    ap.add_argument('--verse-at', type=float, default=123.56,
+                    help='onset of the verse the outro fade must complete before; '
+                         '0 disables the check for a theme with no such verse')
     a = ap.parse_args()
 
     v_len = duration(a.voice)
@@ -208,6 +252,32 @@ def main():
             fail('%s bed needs theme %.2f-%.2fs but the theme is %.2fs. '
                  'The fade would be truncated and the audio would cut off.'
                  % (lbl, start, start + length, t_len))
+
+    # Larry's rule, asserted rather than assumed. NEITHER bed may straddle the verse.
+    # Positions are in THEME time, so the bed's own start has to be added back - the
+    # fade expression inside the filter graph is relative to bed start, not to it.
+    #
+    # Both beds are checked, not just the outro. The intro now enters at 79.6s, only
+    # 44s short of the verse, so it is just as capable of dragging that vocal in - and
+    # under her opening words, where it would be even more obvious.
+    if a.verse_at > 0:
+        for lbl, start, length in [('intro', a.intro_from, a.intro_len),
+                                   ('outro', om_in, a.outro_len)]:
+            if start >= a.verse_at:
+                continue          # a bed that begins after the verse cannot straddle it
+            if start + length > a.verse_at:
+                fail('the %s bed runs theme %.2f-%.2fs, straddling the verse at '
+                     '%.2fs. It would pull that vocal into the episode. Shorten '
+                     '--%s-len.' % (lbl, start, start + length, a.verse_at, lbl))
+        fade_ends = om_in + a.fade_start + a.fade_len
+        if fade_ends > a.verse_at:
+            fail('the outro fade finishes at theme %.2fs but the next verse starts '
+                 'at %.2fs. The episode would end on a half-faded new vocal. Move '
+                 '--fade-start or shorten --fade-len.' % (fade_ends, a.verse_at))
+        print('  intro bed theme %.2f-%.2fs | outro fade completes at theme %.2fs, '
+              '%.2fs clear of the %.2fs verse'
+              % (a.intro_from, a.intro_from + a.intro_len, fade_ends,
+                 a.verse_at - fade_ends, a.verse_at))
 
     speech_end_mix = a.intro_lead + sp_end
     om_start = speech_end_mix - a.outro_lead_in
@@ -234,12 +304,12 @@ def main():
     out_g = '%s*%s*%s' % (fi, sw, fo)
 
     fg = (
-        "[0:a]atrim=%s:%s,asetpts=N/SR/TB,%s,afade=t=in:st=0:d=0.5,"
+        "[0:a]atrim=%s:%s,asetpts=N/SR/TB,%s,afade=t=in:st=0:d=%s,"
         "volume='%s':eval=frame,afade=t=out:st=%s:d=%s[im];"
         "[1:a]%s,adelay=%d:all=1[ep];"
         "[2:a]atrim=%s:%s,asetpts=N/SR/TB,%s,volume='%s':eval=frame,adelay=%d:all=1[om];"
         "[im][ep][om]amix=inputs=3:duration=longest:normalize=0[a]"
-        % (a.intro_from, a.intro_from + a.intro_len, A, in_g,
+        % (a.intro_from, a.intro_from + a.intro_len, A, a.intro_fade_in, in_g,
            a.intro_hold + a.intro_blend, max(1.0, a.intro_len - a.intro_hold - a.intro_blend),
            A, int(round(a.intro_lead * 1000)),
            om_in, om_in + a.outro_len, A, out_g, int(round(om_start * 1000)))
