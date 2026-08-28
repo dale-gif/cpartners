@@ -125,7 +125,13 @@ def balanced(text, n):
         if any(l.strip("?!.,") in STOP for l in lines):
             continue
         lens = [len(l) for l in lines]
-        score = max(lens) * 10 + (max(lens) - min(lens))
+        # A headline like "REAL CASES. REAL RESULTS." carries its own break points. Pure
+        # width-balancing sets it as REAL / CASES. REAL / RESULTS., running a sentence
+        # across a line break; the approved reference breaks at the full stop. Penalise any
+        # line holding a terminator that is not its last character, heavily enough to beat
+        # the evenness term. Headlines with no internal terminator are unaffected.
+        straddle = sum(1 for l in lines if re.search(r'[.?!]\s', l))
+        score = max(lens) * 10 + (max(lens) - min(lens)) + straddle * 400
         if score < best_score:
             best_score = score
             best = lines
@@ -141,9 +147,18 @@ def cap_height(font):
 # ships to the runner once the licence covers it; Inter is the metric-compatible stand-in. Keeping
 # both here means deploying Sohne is a matter of dropping the files in, with no code change - and
 # if they are ever absent the render falls back rather than dying mid-pipeline.
+# head_portrait is a SEPARATE role, not a replacement for head. Larry approved the
+# lighter headline on the 9:16 reference only; landscape covers already in circulation
+# keep Extrafett so this change cannot silently restyle them. Unifying the two is a
+# one-line change here if that is ever wanted.
 FONT_SETS = {
-    "sohne": {"head": "Sohne-Extrafett", "chip": "Sohne-Halbfett", "body": "Sohne-Buch"},
-    "inter": {"head": "Inter-Black", "chip": "Inter-Bold", "body": "Inter-Regular"},
+    "sohne": {"head": "Sohne-Extrafett", "head_portrait": "Sohne-Halbfett",
+              "chip": "Sohne-Halbfett", "body": "Sohne-Buch"},
+    # chip was "Inter-Bold", which has never been committed to fonts/. The fallback set
+    # therefore never resolved, so a failed Sohne fetch killed the render instead of
+    # falling back - the safety net was decorative. Inter-ExtraBold is present and ships.
+    "inter": {"head": "Inter-Black", "head_portrait": "Inter-ExtraBold",
+              "chip": "Inter-ExtraBold", "body": "Inter-Regular"},
 }
 FONT_ORDER = ["sohne", "inter"]
 
@@ -160,11 +175,12 @@ def resolve_fonts(font_dir, want="auto"):
                 if os.path.exists(cand):
                     found[role] = cand
                     break
-        if len(found) == 3:
+        want = len(FONT_SETS[name])
+        if len(found) == want:
             return found, name
         if found:
-            print("[cover] %s is incomplete (%d/3 weights), skipping"
-                  % (name, len(found)), file=sys.stderr)
+            print("[cover] %s is incomplete (%d/%d weights), skipping"
+                  % (name, len(found), want), file=sys.stderr)
     return None, None
 
 
@@ -184,15 +200,34 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
     # separate. Without this gate a sub-header dropped upstream leaves a stray dash hanging below
     # the headline, which reads as a broken render rather than a deliberate headline-only cover.
     show_rule = el["rule"] and show_body
+    # The approved 9:16 reference sets the sub-header directly under the headline with no
+    # separator. Landscape keeps the rule.
+    if not land:
+        show_rule = False
 
     # Geometry. Portrait is measured off the approved 9:16 reference, not derived from landscape.
     # The bottom band is RESERVED for the lockup baked into the plate.
     if land:
         colX, colW, top = px(0.055 * W), px(0.46 * W), px(0.10 * H)
         band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.020, 3, 0.16
+        bodyW = colW
     else:
-        colX, colW, top = px(0.035 * W), px(0.625 * W), px(0.200 * H)
-        band, chip_f, body_f, body_floor, max_body, lock = 0.27, 0.036, 0.024, 0.017, 4, 0.14
+        # 9:16 measured off Mohi's approved reference (2026-08-28), by solving font sizes
+        # from where his lines actually BREAK. Reading cap heights off the sample overshot
+        # twice - 141px against a true 127, and 47px against a true 38 - because a
+        # screenshot's cap height is a soft edge while a line break is exact.
+        #
+        # The headline runs to 0.831W and DELIBERATELY crosses the subject. An earlier
+        # attempt confined it to the plate's black column (ends 0.463W) and Larry called it
+        # too small; that one invented constraint cost ~40% of the size.
+        #
+        # colX 0.071 is the plate's OWN margin - CRP_*_0916_* bake their lockup rule from
+        # x=0.0546W and the Themis mark from 0.0537W, so copy and lockup share a left edge.
+        colX, colW, top = px(0.071 * W), px(0.760 * W), px(0.048 * H)
+        band, chip_f, body_f, body_floor, max_body, lock = 0.225, 0.039, 0.0198, 0.017, 3, 0.135
+        # The sub-header wraps NARROWER than the headline on the reference, which is the
+        # only reason bodyW exists rather than everything sharing colW.
+        bodyW = px(0.580 * W)
 
     areaH = (H - px(lock * H)) - top
     gap = px(0.026 * H)
@@ -219,7 +254,7 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
             cur = ""
             for wd in body.split():
                 t = (cur + " " + wd).strip()
-                if d.textlength(t, font=body_font) <= colW or not cur:
+                if d.textlength(t, font=body_font) <= bodyW or not cur:
                     cur = t
                 else:
                     lines.append(cur)
@@ -243,6 +278,8 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
     above = (chipH + gap) if show_eyebrow else 0
     headH = max(px(0.08 * H), min(areaH - below - above, px(band * H)))
 
+    head_path = fonts["head"] if land else fonts.get("head_portrait", fonts["head"])
+
     best = None
     for n in range(1, min(4, len(headline.split())) + 1):
         ls = balanced(headline, n)
@@ -251,14 +288,14 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
         lo, hi = 20, 900
         while lo < hi:                      # binary search the largest size that fits
             mid = (lo + hi + 1) // 2
-            f = ImageFont.truetype(fonts["head"], mid)
+            f = ImageFont.truetype(head_path, mid)
             wmax = max(d.textlength(l, font=f) for l in ls)
             hgt = (n - 1) * mid * 1.02 + cap_height(f)
             if wmax <= colW and hgt <= headH:
                 lo = mid
             else:
                 hi = mid - 1
-        f = ImageFont.truetype(fonts["head"], lo)
+        f = ImageFont.truetype(head_path, lo)
         fill = min(
             max(d.textlength(l, font=f) for l in ls) / colW,
             ((n - 1) * lo * 1.02 + cap_height(f)) / headH,
@@ -268,7 +305,7 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
             best = (score, ls, lo, n)
 
     _, h_lines, h_size, h_n = best
-    head_font = ImageFont.truetype(fonts["head"], h_size)
+    head_font = ImageFont.truetype(head_path, h_size)
     h_cap = cap_height(head_font)
     h_lh = px(h_size * 1.02)
 
