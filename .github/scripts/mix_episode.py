@@ -158,21 +158,34 @@ def main():
     # built around landing on it. The remaster has no hook, so the outro now
     # ends on the track's own resolution instead - the episode finishes when the
     # song finishes, which is better than fading over a crescendo.
-    ap.add_argument('--hook-at', type=float, default=139.0,
-                    help='the musical moment the swell should land on')
+    # LARRY'S SPEC, 2026-08-27, against the Suno track (197.4s, lyric from 0.00s):
+    #   "Intro: run for 33 seconds and start to fade into speech"
+    #   "Outro: run for 1:50 and start to fade before the next verse at 2:03"
+    #   "run the song for at least a full minute at the end"
+    #   "apply better audio fading and transition from song to speech, speech to song"
+    # The verse he means starts at 123.46s, so the fade completes before it.
+    # Outro bed is the track from 0.00s, which is why hook-at equals hook-delay.
+    ap.add_argument('--hook-at', type=float, default=9.0,
+                    help='musical moment the swell lands on; minus hook-delay gives the bed trim point')
     ap.add_argument('--intro-from', type=float, default=0.0)
-    ap.add_argument('--intro-len', type=float, default=16.0)
-    ap.add_argument('--intro-lead', type=float, default=13.4,
+    ap.add_argument('--intro-hold', type=float, default=33.0,
+                    help="seconds of music at full before the blend starts - Larry's 33")
+    ap.add_argument('--intro-blend', type=float, default=6.0,
+                    help='length of the ramp from full down to the ducked bed')
+    ap.add_argument('--intro-len', type=float, default=47.0)
+    ap.add_argument('--intro-lead', type=float, default=34.5,
                     help='seconds of intro before the voice starts')
     ap.add_argument('--outro-lead-in', type=float, default=9.0)
     ap.add_argument('--hook-delay', type=float, default=9.0,
                     help='seconds from bed start to that moment landing')
-    ap.add_argument('--outro-len', type=float, default=21.88)
+    ap.add_argument('--outro-len', type=float, default=123.46)
     ap.add_argument('--headroom', type=float, default=12.0)
     # Fade is only a tidy-up at the very end - the track resolves by itself, so a
     # long fade would talk over an ending the composer already wrote.
-    ap.add_argument('--fade-start', type=float, default=20.0)
-    ap.add_argument('--fade-len', type=float, default=1.9)
+    ap.add_argument('--fade-start', type=float, default=110.0,
+                    help="Larry's 1:50 - where the outro fade begins")
+    ap.add_argument('--fade-len', type=float, default=13.4,
+                    help='completes at 123.4s, immediately before the 2:03 verse')
     a = ap.parse_args()
 
     v_len = duration(a.voice)
@@ -210,7 +223,10 @@ def main():
     print('  total %.2fs' % total)
 
     A = 'aformat=sample_rates=%d:channel_layouts=mono' % SR
-    in_g = '1+(%s-1)*%s' % (duck_in, scurve('t', a.intro_len - 4.4, a.intro_len - 1.8))
+    # Full for intro_hold, then a raised-cosine ramp down to the ducked bed over
+    # intro_blend. Derived from Larry's numbers instead of from intro_len, so the
+    # hold is exactly what he asked for and the blend can be widened independently.
+    in_g = '1+(%s-1)*%s' % (duck_in, scurve('t', a.intro_hold, a.intro_hold + a.intro_blend))
     fi = scurve('t', 0.0, 0.6)
     sw = '(%s+(1-%s)*%s)' % (duck_out, duck_out, scurve('t', a.outro_lead_in,
                                                         a.outro_lead_in + 1.5))
@@ -219,11 +235,12 @@ def main():
 
     fg = (
         "[0:a]atrim=%s:%s,asetpts=N/SR/TB,%s,afade=t=in:st=0:d=0.5,"
-        "volume='%s':eval=frame,afade=t=out:st=%s:d=3[im];"
+        "volume='%s':eval=frame,afade=t=out:st=%s:d=%s[im];"
         "[1:a]%s,adelay=%d:all=1[ep];"
         "[2:a]atrim=%s:%s,asetpts=N/SR/TB,%s,volume='%s':eval=frame,adelay=%d:all=1[om];"
         "[im][ep][om]amix=inputs=3:duration=longest:normalize=0[a]"
-        % (a.intro_from, a.intro_from + a.intro_len, A, in_g, a.intro_len - 3,
+        % (a.intro_from, a.intro_from + a.intro_len, A, in_g,
+           a.intro_hold + a.intro_blend, max(1.0, a.intro_len - a.intro_hold - a.intro_blend),
            A, int(round(a.intro_lead * 1000)),
            om_in, om_in + a.outro_len, A, out_g, int(round(om_start * 1000)))
     )
