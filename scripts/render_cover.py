@@ -154,11 +154,12 @@ def cap_height(font):
 FONT_SETS = {
     "sohne": {"head": "Sohne-Extrafett", "head_portrait": "Sohne-Halbfett",
               "chip": "Sohne-Halbfett", "body": "Sohne-Buch"},
-    # chip was "Inter-Bold", which has never been committed to fonts/. The fallback set
-    # therefore never resolved, so a failed Sohne fetch killed the render instead of
-    # falling back - the safety net was decorative. Inter-ExtraBold is present and ships.
+    # Inter-Bold is NOT committed to fonts/; render.yml downloads it into fonts/ at build
+    # time along with Regular, Black and ExtraBold. So this set resolves in CI even though
+    # it cannot resolve against a bare checkout - run render_cover.py locally with
+    # --font-dir fonts and it will correctly report the set incomplete.
     "inter": {"head": "Inter-Black", "head_portrait": "Inter-ExtraBold",
-              "chip": "Inter-ExtraBold", "body": "Inter-Regular"},
+              "chip": "Inter-Bold", "body": "Inter-Regular"},
 }
 FONT_ORDER = ["sohne", "inter"]
 
