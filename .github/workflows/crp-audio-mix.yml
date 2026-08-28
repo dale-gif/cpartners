@@ -1,9 +1,13 @@
 # =============================================================================
 # CRP Audio Mix - podcast music bed engine
 # =============================================================================
-# Lays the show theme around a finished voice track: sung-hook intro, then a bed
-# that enters under the closing lines, swells when the last word ends, and lands
-# on the hook. Returns one loudness-normalised MP3.
+# Lays the show theme around a finished voice track: a 33-second intro that blends
+# down into her opening, then a bed that enters under the closing lines, swells when
+# the last word ends, carries the sung "Cash Flow Show / Situation Room" chorus, and
+# fades out in the gap before the next verse. Returns one loudness-normalised MP3.
+#
+# Every timing number lives in .github/scripts/mix_episode.py. This file passes NONE
+# of them - see the note on the mix_args input for why that is deliberate.
 #
 # WHY workflow_dispatch AND NOT repository_dispatch
 # -------------------------------------------------
@@ -48,25 +52,26 @@ on:
         required: false
         default: 'assets/audio/cashflow_theme.mp3'
         type: string
-      hook_at:
-        description: 'Seconds into the theme where the sung hook starts.'
+      # ONE free-form override input, deliberately, instead of one input per knob.
+      #
+      # This file used to carry its own copies of hook_at / hook_delay /
+      # outro_lead_in / headroom as defaults. That is how the 2026-08-28 defect
+      # happened: mix_episode.py was retuned to Larry's spec, these defaults were
+      # not, and because n8n dispatches with only asset_id and voice_url, THESE
+      # stale numbers won every run. hook_at 14.96 / hook_delay 10.0 put the outro
+      # bed 4.96s into the song, which slid the whole fade 4.96s later and ended
+      # the episode 5.4s INTO the 2:03 verse - precisely the fault Larry reported.
+      #
+      # A default that silently overrides the tuned value is worse than no input at
+      # all. So mix_episode.py is now the single source of truth for every number,
+      # and this passes nothing unless a human deliberately types it.
+      mix_args:
+        description: >-
+          Optional flags appended verbatim to mix_episode.py, for one-off tuning
+          only. Blank means use the tuned defaults in the script - which is what
+          every automated run should do. Example: --intro-hold 40 --fade-start 100
         required: false
-        default: '14.96'
-        type: string
-      outro_lead_in:
-        description: 'Seconds before the last word that the outro bed enters.'
-        required: false
-        default: '9.0'
-        type: string
-      hook_delay:
-        description: 'Seconds from bed start to the hook landing.'
-        required: false
-        default: '10.0'
-        type: string
-      headroom:
-        description: 'dB the ducked bed sits under her speech.'
-        required: false
-        default: '12.0'
+        default: ''
         type: string
 
 # Serialise per asset so one episode never mixes twice at once, while different
@@ -130,17 +135,30 @@ jobs:
           ls -la "${{ inputs.theme }}"
 
       - name: Mix
+        env:
+          MIX_ARGS: ${{ inputs.mix_args }}
         run: |
           set -euo pipefail
+          # mix_args is free text on a dispatch input, so it is validated against a
+          # strict shape before it reaches a command line: long flags and numbers
+          # only. A typo is then rejected loudly instead of being pasted into the
+          # shell or silently doing nothing.
+          if [ -n "${MIX_ARGS}" ]; then
+            if ! printf '%s' "${MIX_ARGS}" | grep -qE '^(--[a-z][a-z-]*[[:space:]]+-?[0-9]+(\.[0-9]+)?[[:space:]]*)+$'; then
+              echo "::error::mix_args must be '--flag number' pairs only. Got: ${MIX_ARGS}"
+              exit 1
+            fi
+            echo "::warning::Overriding the tuned defaults with: ${MIX_ARGS}"
+          fi
+          # Unquoted on purpose - the pairs above must split into separate argv
+          # entries. The regex is what makes that safe.
+          # shellcheck disable=SC2086
           python3 .github/scripts/mix_episode.py \
             --voice voice_raw.mp3 \
             --theme "${{ inputs.theme }}" \
             --out "${{ inputs.asset_id }}_mixed.mp3" \
             --asset-id "${{ inputs.asset_id }}" \
-            --hook-at "${{ inputs.hook_at }}" \
-            --outro-lead-in "${{ inputs.outro_lead_in }}" \
-            --hook-delay "${{ inputs.hook_delay }}" \
-            --headroom "${{ inputs.headroom }}"
+            ${MIX_ARGS}
 
       - name: Verify the output
         run: |
