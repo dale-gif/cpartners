@@ -62,6 +62,19 @@ echo "[title-card] video ${W}x${H} @ ${FPS} fps, audio=${HAS_AUDIO:-none}, hold=
 CARD_V="scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,fps=${FPS},format=yuv420p,setsar=1"
 MAIN_V="fps=${FPS},format=yuv420p,setsar=1"
 
+# BOTH audio branches are forced to the SAME sample format before concat.
+#
+# Without this, anullsrc and the decoded main audio reach concat in different
+# formats, concat negotiates a common one, and ffmpeg DITHERS on the way -
+# shaped high-frequency noise, added across the whole track. Measured on the
+# Bathla render: energy above 12kHz went 2.4% -> 6.1%, with content up to 20kHz
+# on a source that dies at 15.3kHz. Larry called it "fuzzy" and he was right.
+# It hit every video that got a title card, which is all of them.
+#
+# Matching the formats first leaves concat nothing to convert, and the main
+# audio comes out measurably identical to a stream copy.
+A_FMT="aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+
 # concat demuxer needs identical encoding params; the concat FILTER re-encodes and so cannot
 # desync. Slower, but this runs once per asset and correctness beats speed here.
 if [ -n "${HAS_AUDIO}" ]; then
@@ -69,7 +82,7 @@ if [ -n "${HAS_AUDIO}" ]; then
     -loop 1 -t "$HOLD" -i "$CARD" \
     -f lavfi -t "$HOLD" -i anullsrc=channel_layout=stereo:sample_rate=48000 \
     -i "$VIDEO" \
-    -filter_complex "[0:v]${CARD_V}[card];[2:v]${MAIN_V}[main];[2:a]aresample=48000,aformat=channel_layouts=stereo[maina];[card][1:a][main][maina]concat=n=2:v=1:a=1[v][a]" \
+    -filter_complex "[0:v]${CARD_V}[card];[2:v]${MAIN_V}[main];[1:a]${A_FMT}[carda];[2:a]${A_FMT}[maina];[card][carda][main][maina]concat=n=2:v=1:a=1[v][a]" \
     -map "[v]" -map "[a]" \
     -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p \
     -c:a aac -b:a 192k \
