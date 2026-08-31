@@ -80,8 +80,15 @@ COLUMN_F_SUBSTITUTIONS = [
 # rendered full-frame as a peak hook. We enforce below the AI's judgement.
 MAX_OVERLAY_WORDS = 3       # per line, for standard black-gradient overlays
 MAX_OVERLAY_CHARS = 14      # per line, matches the AI prompt's stated limit
-MAX_PEAK_WORDS = 2          # per line, for full-frame peak (big-text) overlays
-MAX_PEAK_CHARS = 12         # per line, for full-frame peak — extra strict
+MAX_PEAK_WORDS = 3          # per line, for full-frame peak (big-text) overlays
+MAX_PEAK_CHARS = 12         # per line, for full-frame peak - extra strict
+#
+# MAX_PEAK_WORDS was 2. The CHARACTER cap is the real visual constraint - it is
+# what stops text covering the avatar - and at 12 it is already stricter for peak
+# than the 14 used elsewhere. The word cap added nothing on top of it and did
+# real damage: "TO THE END" is ten characters but three words, so it was silently
+# chopped to "TO THE" and the Bathla campaign video shipped a hook reading
+# "OWED MONEY? / WATCH THIS / TO THE". Larry saw it before we did.
 
 
 def apply_column_f(text: str) -> str:
@@ -95,24 +102,48 @@ def apply_column_f(text: str) -> str:
 
 
 def enforce_overlay_lines(lines, is_peak: bool = False):
-    """Apply Column F + hard word/char caps to an overlay's lines.
+    """Fit an overlay's text to the caps by REFLOWING it, never by truncating.
 
-    Peak overlays (full-frame black takeover) get a stricter cap because they
-    cover the avatar and any long text visually dominates the frame.
+    The previous version capped each line independently and threw away whatever
+    did not fit. That silently produced fragments, and they went to air:
+
+        planner  ["OWED MONEY?", "WATCH THIS", "TO THE END"]
+        shipped   OWED MONEY? / WATCH THIS / TO THE          <- sentence beheaded
+
+        planner  ["85,000", "DIRECTOR PENALTY", "NOTICES"]
+        shipped   85,000 / DIRECTOR PEN / NOTICES            <- word chopped in half
+
+    Truncation is never the right answer for on-screen copy: a cut-off line reads
+    to a viewer as a broken render, which is worse than no overlay at all. So the
+    words are re-flowed across the available lines, and if they genuinely cannot
+    fit, the overlay is DROPPED and the avatar plays clean.
     """
     max_words = MAX_PEAK_WORDS if is_peak else MAX_OVERLAY_WORDS
     max_chars = MAX_PEAK_CHARS if is_peak else MAX_OVERLAY_CHARS
+
+    joined = " ".join(str(l).strip() for l in (lines or []) if str(l).strip())
+    words = apply_column_f(joined).split()
+    if not words:
+        return []
+
     out = []
-    for raw in (lines or [])[:3]:
-        line = apply_column_f(str(raw).strip())
-        words = line.split()
-        if len(words) > max_words:
-            line = " ".join(words[:max_words])
-        if len(line) > max_chars:
-            line = line[:max_chars].rstrip()
-        if line:
-            out.append(line)
-    return out
+    cur = ""
+    for w in words:
+        if len(w) > max_chars:
+            # A single word wider than the frame allows. Clipping it would show
+            # half a word, so drop the whole overlay instead.
+            return []
+        cand = (cur + " " + w).strip()
+        if len(cand) <= max_chars and len(cand.split()) <= max_words:
+            cur = cand
+            continue
+        out.append(cur)
+        cur = w
+        if len(out) == 3:
+            return []
+    if cur:
+        out.append(cur)
+    return out if len(out) <= 3 else []
 
 
 CLAUDE_SYSTEM = (
