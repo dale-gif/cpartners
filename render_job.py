@@ -46,6 +46,68 @@ ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 FONT_DIR = Path(os.environ.get("FONT_DIR", "fonts"))
 WORK = Path("work")
 
+# ── TRANSCRIPT SPELLING: UNDO OUR OWN PHONETICS ──────────────────────
+# We feed ElevenLabs deliberate misspellings so a name is SAID correctly -
+# "Bathla" is voiced from a phonetic form that sounds like BARTH-la. Whisper then
+# transcribes what it hears, so the phonetic spelling comes back in the
+# transcript, and every downstream consumer inherits it: the Claude planner, the
+# infographic card titles, and the on-screen overlays.
+#
+# It shipped. The Bathla campaign video opened with a full-frame overlay reading
+# "BATHLER / OWES YOU / MONEY" while the captions beneath it, which came from
+# OpusClip and had been corrected by hand, read "IF THE BATHLA GROUP". Same
+# moment, two spellings, one of them the client's name.
+#
+# Fixed at the transcript, not at the overlay. Correcting it later would fix the
+# overlays and leave the planner still reasoning about a company called Bathler.
+# Add a row here whenever a pronunciation dictionary gets a new proper noun.
+TRANSCRIPT_SPELLING = [
+    (r"\bBARTHLARS\b", "Bathla's"),
+    (r"\bBATHLERS\b", "Bathla's"),
+    (r"\bBARTHLAR\b", "Bathla"),
+    (r"\bBARTHLER\b", "Bathla"),
+    (r"\bBARTHLA\b", "Bathla"),
+    (r"\bBATHLER\b", "Bathla"),
+    (r"\bBATHLAR\b", "Bathla"),
+]
+
+
+def fix_spelling(text):
+    """Undo phonetic spellings in one string. Case-insensitive, case-normalising."""
+    if not text:
+        return text
+    for pattern, replacement in TRANSCRIPT_SPELLING:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def normalise_transcript(transcript: dict) -> dict:
+    """Apply fix_spelling to every text field Whisper returns.
+
+    verbose_json carries the same words in three places - the flat `text`, each
+    `segments[].text`, and each `words[].word` (both top level and per segment).
+    Miss one and a stale spelling survives in whichever field a consumer reads.
+    """
+    if not isinstance(transcript, dict):
+        return transcript
+
+    def fix_words(container):
+        for w in (container.get("words") or []):
+            if isinstance(w, dict) and "word" in w:
+                w["word"] = fix_spelling(w["word"])
+
+    if "text" in transcript:
+        transcript["text"] = fix_spelling(transcript["text"])
+    fix_words(transcript)
+    for seg in (transcript.get("segments") or []):
+        if not isinstance(seg, dict):
+            continue
+        if "text" in seg:
+            seg["text"] = fix_spelling(seg["text"])
+        fix_words(seg)
+    return transcript
+
+
 # ── COLUMN F: ON-SCREEN SUBSTITUTIONS (Larry v2 dictionary) ──────────────────
 # The avatar speaks plain English ("director penalty notices", "the tax office")
 # so the voice sounds professional. On-screen text overlays, however, must use
@@ -397,7 +459,8 @@ def whisper_transcribe(audio: Path) -> dict:
         )
     if not r.ok:
         raise RuntimeError(f"whisper {r.status_code}: {r.text[:500]}")
-    return r.json()
+    # Correct our own phonetics before ANY consumer sees the transcript.
+    return normalise_transcript(r.json())
 
 
 def claude_plan(transcript: dict, duration: float, fmt: str,
