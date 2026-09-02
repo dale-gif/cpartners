@@ -276,7 +276,19 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
     # THE TITLE BAND. The headline gets a fixed share of the canvas, never the leftovers, so a
     # longer headline sizes DOWN instead of pushing the chip and sub-header out of the way.
     below = (rule_gap + ruleH if show_rule else 0) + (rule_gap + bodyH if show_body else 0)
-    above = (chipH + gap) if show_eyebrow else 0
+
+    # The chip's slot is RESERVED whether or not a chip is drawn.
+    #
+    # Without this, a template with no eyebrow (T1, T3, T6) starts its headline higher AND
+    # gets a taller title band, so the binary search sizes the type up and it drifts right
+    # across the presenter's face. T2 carries a chip, which pushes the stack down and shrinks
+    # the band, so it lands correctly. On the first rotation sample Larry's three eyebrow-less
+    # templates were all marked and T2 was left alone - that asymmetry, not the crossing
+    # itself, was the defect. The approved reference does cross the subject on purpose.
+    #
+    # Reserving the slot gives all four templates one baseline and one title band, so the
+    # rotation varies the layout without moving where the type sits.
+    above = px(chip_f * H) + gap
     headH = max(px(0.08 * H), min(areaH - below - above, px(band * H)))
 
     head_path = fonts["head"] if land else fonts.get("head_portrait", fonts["head"])
@@ -312,6 +324,8 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
 
     # Stack, top anchored.
     y = top
+    if not show_eyebrow:
+        y += above          # keep the reserved slot empty, same baseline as a chipped cover
     if show_eyebrow:
         d.rectangle([colX, y, colX + chipW, y + chipH], fill=C_CHARCOAL)
         cc = cap_height(chip_font)
