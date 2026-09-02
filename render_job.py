@@ -721,6 +721,19 @@ SF_SYSTEM = (
     "hook (never 4, never 'lines that stack' — one short phrase, one line, "
     "period), taken VERBATIM from what the presenter actually says — never "
     "paraphrase, never invent words. Punchy and scroll-stopping.\n\n"
+    "EACH HOOK MUST READ AS A COMPLETE THOUGHT ON ITS OWN. It is shown alone "
+    "on screen with nothing before or after it, so a hook that hangs mid-idea "
+    "looks like a broken render, which is the one thing Larry has asked us to "
+    "fix. Choose the 1-3 words INSIDE the sentence that carry the punch, not "
+    "the first 1-3 words of it.\n\n"
+    "  GOOD: NO PHONE CALL / 21 DAYS / PERSONALLY LIABLE / THEY DONT PAY\n"
+    "  BAD:  YOU GET NO (hangs) / THE MONEY GOES (hangs) / GOES STRAIGHT "
+    "(starts mid-clause) / OF PAYMENT (starts on a preposition) / OFFICE "
+    "(a stray word, not a thought)\n\n"
+    "Never END a hook on: the, a, an, of, to, and, or, your, you, is, are, "
+    "get, no, goes, still, that. Never START one on: and, or, of, to, that, "
+    "is, are. If the punchy words cannot be cut to 3 and still read whole, "
+    "pick a different moment in the clip instead.\n\n"
     "WHAT TO PICK: the emotional / high-impact peaks — the lines that make "
     "someone stop scrolling (e.g. STILL OWE, THEY DON'T PAY, YOU WAITED, GET "
     "PAID, 30 DAYS). Cut each to 1-3 words. Space them roughly one every "
@@ -736,6 +749,80 @@ SF_SYSTEM = (
     "{\"text_overlays\":[{\"timestamp\":<seconds>,\"lines\":[\"WORD\",\"WORD\"],"
     "\"punchy\":<true for the single best; omit otherwise>}]}"
 )
+
+
+# Words a hook must not END on: the phrase is left hanging and reads as a
+# truncation even though every word is complete. Larry's complaint about
+# "WATCH THIS TO THE" is this exact shape. Also words it must not START on,
+# which produce the mirror-image dangle ("OF PAYMENT", "AND SUPPLIERS").
+_SF_DANGLE_END = {
+    "the", "a", "an", "of", "to", "in", "on", "at", "by", "for", "with", "from",
+    "and", "or", "but", "if", "so", "than", "that", "this", "these", "those",
+    "your", "you", "my", "our", "their", "his", "her", "its", "it",
+    "is", "are", "was", "were", "be", "been", "am", "do", "does", "did",
+    "have", "has", "had", "will", "would", "can", "could", "should", "may",
+    "get", "gets", "got", "no", "not", "very", "just", "still", "any", "some",
+    "goes", "go", "went", "come", "comes", "came", "keep", "keeps", "make",
+    "makes", "take", "takes", "want", "wants", "need", "needs", "see", "sees",
+    "too", "straight", "every", "more", "most", "own", "same", "both", "each",
+    "into", "over", "under", "about", "before", "after", "when", "where",
+    "how", "why", "what", "who", "there", "here",
+}
+_SF_DANGLE_START = {
+    "and", "or", "but", "of", "to", "in", "on", "at", "by", "for", "with",
+    "from", "than", "that", "so", "if", "is", "are", "was", "were", "be",
+    "been", "am", "do", "does", "did", "have", "has", "had", "will", "would",
+    "can", "could", "should", "may", "get", "gets", "got", "goes", "go",
+    "went", "keep", "keeps", "make", "makes", "take", "takes", "see", "sees",
+    "want", "wants", "need", "needs", "just", "very", "any", "some",
+}
+
+
+def sf_best_phrase(phrase: str, cap: int = 3):
+    """Pick the best COMPLETE sub-phrase of `phrase` at up to `cap` words.
+
+    The old behaviour was `" ".join(words[:cap])` - a blind cut at three words.
+    That is what manufactured the unfinished hooks: "THE MONEY GOES STRAIGHT
+    THERE" became "THE MONEY GOES", and "YOU GET NO PHONE CALL" became "YOU GET
+    NO", when the strong hook sitting inside it was "NO PHONE CALL".
+
+    So instead of cutting at a fixed position, consider every contiguous window
+    of 1..cap words and score them. A window is only eligible if it does not
+    dangle at either end. Among the eligible ones, prefer more words (more
+    context), then the LATEST window - in speech the payoff lands at the end of
+    the clause, so "you get no PHONE CALL" and "it is TOO LATE" are the hooks,
+    not "GET NO PHONE" and "IT IS TOO".
+
+    Returns (phrase, None) on success or (None, reason) when nothing in the
+    hook reads as a complete thought - in which case the caller drops it.
+    Dropping is right: a missing hook is invisible, a truncated one is the
+    defect Larry asked us to remove.
+    """
+    words = phrase.split()
+    if not words:
+        return None, "empty"
+
+    def dangles(ws):
+        return (ws[-1].strip(".,!?:;'\"").lower() in _SF_DANGLE_END
+                or ws[0].strip(".,!?:;'\"").lower() in _SF_DANGLE_START)
+
+    if len(words) <= cap and not dangles(words):
+        return " ".join(words), None
+
+    best = None
+    for n in range(min(cap, len(words)), 0, -1):
+        for i in range(0, len(words) - n + 1):
+            win = words[i : i + n]
+            if dangles(win):
+                continue
+            score = (n, i)                      # longer first, then LATEST
+            if best is None or score > best[0]:
+                best = (score, " ".join(win))
+        if best is not None:
+            break                               # longest clean window wins
+    if best is None:
+        return None, "no complete phrase within %d words" % cap
+    return best[1], None
 
 
 def sf_plan(transcript: dict, duration: float) -> dict:
@@ -784,14 +871,15 @@ def sf_plan(transcript: dict, duration: float) -> dict:
             phrase = " ".join(str(x) for x in raw if x).strip()
         else:
             phrase = str(ov.get("text") or "").strip()
-        words = phrase.split()
-        if len(words) > 3:
-            phrase = " ".join(words[:3])
-            trimmed += 1
-        elif not words:
+        fixed, why = sf_best_phrase(phrase, cap=3)
+        if fixed is None:
+            log(f"SF plan: dropped hook {phrase!r} ({why})")
             dropped += 1
             continue
-        ov["lines"] = [phrase]
+        if fixed != phrase:
+            log(f"SF plan: reshaped {phrase!r} -> {fixed!r}")
+            trimmed += 1
+        ov["lines"] = [fixed]
         if ov.get("punchy"):
             if punchy_seen:          # enforce a single centered punchy line
                 ov.pop("punchy", None)
@@ -803,7 +891,7 @@ def sf_plan(transcript: dict, duration: float) -> dict:
     if dropped:
         log(f"SF plan: dropped {dropped} hook(s) outside 0..{safe_end:.1f}s")
     if trimmed:
-        log(f"SF plan: trimmed {trimmed} hook(s) to Larry's 3-word cap")
+        log(f"SF plan: reshaped {trimmed} hook(s) to a complete phrase within 3 words")
     log(f"SF plan: {len(kept)} OST hook(s), punchy={'yes' if punchy_seen else 'none'}")
     return plan
 
