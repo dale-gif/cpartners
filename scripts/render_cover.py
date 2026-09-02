@@ -18,6 +18,8 @@ import io
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 
 from PIL import Image, ImageDraw, ImageFont
@@ -84,19 +86,54 @@ def drive_direct(url):
             % m.group(1))
 
 
-def fetch(src, timeout=60):
-    """Load the plate from a local path or a URL."""
+def fetch(src, timeout=60, attempts=5):
+    """Load the plate from a local path or a URL, retrying transient Drive failures.
+
+    The plates live on Drive and are pulled unauthenticated. Under load Drive answers
+    with 503 or 429 rather than the file, and a single 503 here used to take the whole
+    render down: the cover step exited non-zero, so the title card and the GitHub
+    release were both skipped and the watcher then 404d looking for the release. One
+    throttled HTTP GET should not cost a finished video.
+
+    Retrying is safe precisely because this is a GET. Nothing is created and nothing is
+    published, so a second attempt cannot duplicate anything - unlike the Drive upload
+    and the Metricool post, which must never be retried blind.
+    """
     if os.path.exists(src):
         return Image.open(src).convert("RGB")
     src = drive_direct(src)
-    req = urllib.request.Request(src, headers={"User-Agent": "crp-cover/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = r.read()
-    im = Image.open(io.BytesIO(data))
-    # Drive can answer uc?export=download with an HTML interstitial instead of bytes. load()
-    # forces the decode now so we fail loudly here rather than publishing a broken asset.
-    im.load()
-    return im.convert("RGB")
+
+    RETRY_STATUS = {429, 500, 502, 503, 504}
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(src, headers={"User-Agent": "crp-cover/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = r.read()
+            im = Image.open(io.BytesIO(data))
+            # Drive can answer uc?export=download with an HTML interstitial instead of
+            # bytes. load() forces the decode now so we fail here rather than publishing
+            # a broken asset. It is also retryable: the interstitial is what Drive serves
+            # when it is throttling, and the next attempt often returns the real file.
+            im.load()
+            if attempt > 1:
+                print("[cover] plate fetched on attempt %d" % attempt)
+            return im.convert("RGB")
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code not in RETRY_STATUS or attempt == attempts:
+                raise
+            print("[cover] plate HTTP %d, attempt %d/%d" % (e.code, attempt, attempts),
+                  file=sys.stderr)
+        except (urllib.error.URLError, OSError) as e:
+            # OSError covers PIL's UnidentifiedImageError on a throttle interstitial.
+            last = e
+            if attempt == attempts:
+                raise
+            print("[cover] plate fetch failed (%s), attempt %d/%d"
+                  % (type(e).__name__, attempt, attempts), file=sys.stderr)
+        time.sleep(min(2 ** attempt, 16))
+    raise last
 
 
 def balanced(text, n):
