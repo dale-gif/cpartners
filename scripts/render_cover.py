@@ -28,6 +28,17 @@ C_WHITE = "#F7F7F5"
 C_SILVER = "#C9C9C7"
 C_CHARCOAL = "#242424"
 
+# A 9:16 cover is 1080x1920, but Instagram's profile grid shows a CENTRE SQUARE
+# of it: 1080x1080, keeping y 420..1500 and discarding the top and bottom 420.
+# The portrait layout used to start its text at 0.048*H = y92, which is entirely
+# inside the discarded strip - so on the grid the headline was sliced and read
+# as broken text, the exact fault the library was reset over. Pinterest (2:3)
+# and some Facebook previews crop the same way.
+#
+# 420/1920 = 0.21875. Keeping the whole text block between these two lines means
+# any centre crop, square or 4:5, keeps the headline whole.
+CROP_SAFE = 0.219
+
 # A bare stopword stranded on its own headline line reads as a mistake.
 STOP = set("A AN THE TO OF AND OR IS ARE ON IN FOR AT BY IT MY YOUR NO WE OUR".split())
 
@@ -261,13 +272,14 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
         #
         # colX 0.071 is the plate's OWN margin - CRP_*_0916_* bake their lockup rule from
         # x=0.0546W and the Themis mark from 0.0537W, so copy and lockup share a left edge.
-        colX, colW, top = px(0.071 * W), px(0.760 * W), px(0.048 * H)
+        colX, colW, top = px(0.071 * W), px(0.760 * W), px(CROP_SAFE * H)
         band, chip_f, body_f, body_floor, max_body, lock = 0.225, 0.039, 0.0198, 0.017, 3, 0.135
         # The sub-header wraps NARROWER than the headline on the reference, which is the
         # only reason bodyW exists rather than everything sharing colW.
         bodyW = px(0.580 * W)
 
-    areaH = (H - px(lock * H)) - top
+    area_lock = lock if land else max(lock, CROP_SAFE)
+    areaH = (H - px(area_lock * H)) - top
     gap = px(0.026 * H)
     rule_gap = px(0.042 * H)
 
