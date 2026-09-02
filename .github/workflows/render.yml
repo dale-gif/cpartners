@@ -40,6 +40,10 @@ on:
         description: 'T1 Hook / T2 Problem / T3 Solution / T5 Authority'
         required: false
         default: 'T2'
+      coverInk:
+        description: 'dark = light type for a dark plate, light = dark type for a light plate'
+        required: false
+        default: 'dark'
       cardSeconds:
         description: 'How long to hold the title card as frame one'
         required: false
@@ -145,6 +149,7 @@ jobs:
           EYEBROW:  ${{ github.event.client_payload.coverEyebrow  || inputs.coverEyebrow }}
           BODY:     ${{ github.event.client_payload.coverBody     || inputs.coverBody }}
           TEMPLATE: ${{ github.event.client_payload.coverTemplate || inputs.coverTemplate }}
+          INK:      ${{ github.event.client_payload.coverInk || inputs.coverInk }}
           VIDEO_ID: ${{ github.event.client_payload.videoId || inputs.videoId }}
         run: |
           mkdir -p out
@@ -157,7 +162,7 @@ jobs:
             exit 1
           fi
           OUT="out/${VIDEO_ID}_CRP_COVER.png"
-          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --font-dir fonts
+          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --ink "${INK:-dark}" --font-dir fonts
           echo "cover_path=${OUT}" >> $GITHUB_OUTPUT
           echo "Rendered ${OUT}"
 

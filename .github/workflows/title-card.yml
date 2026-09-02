@@ -49,6 +49,10 @@ on:
         description: 'T1 Hook / T2 Problem / T3 Solution / T5 Authority'
         required: false
         default: 'T2'
+      coverInk:
+        description: 'dark = light type for a dark plate, light = dark type for a light plate'
+        required: false
+        default: 'dark'
       cardSeconds:
         description: 'How long the card is held'
         required: false
@@ -176,6 +180,7 @@ jobs:
           EYEBROW:  ${{ inputs.coverEyebrow }}
           BODY:     ${{ inputs.coverBody }}
           TEMPLATE: ${{ inputs.coverTemplate }}
+          INK:      ${{ inputs.coverInk }}
           VIDEO_ID: ${{ inputs.videoId }}
         run: |
           if [ -z "${PLATE:-}" ]; then
@@ -183,7 +188,7 @@ jobs:
             exit 0
           fi
           OUT="out/${VIDEO_ID}_CRP_COVER.png"
-          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --font-dir fonts
+          python scripts/render_cover.py             --plate "${PLATE}" --out "${OUT}"             --headline "${HEADLINE}" --eyebrow "${EYEBROW}" --body "${BODY}"             --template "${TEMPLATE:-T2}" --ink "${INK:-dark}" --font-dir fonts
           echo "cover_path=${OUT}" >> $GITHUB_OUTPUT
 
       - name: Prepend title card

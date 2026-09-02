@@ -28,16 +28,32 @@ C_WHITE = "#F7F7F5"
 C_SILVER = "#C9C9C7"
 C_CHARCOAL = "#242424"
 
-# A 9:16 cover is 1080x1920, but Instagram's profile grid shows a CENTRE SQUARE
-# of it: 1080x1080, keeping y 420..1500 and discarding the top and bottom 420.
-# The portrait layout used to start its text at 0.048*H = y92, which is entirely
-# inside the discarded strip - so on the grid the headline was sliced and read
-# as broken text, the exact fault the library was reset over. Pinterest (2:3)
-# and some Facebook previews crop the same way.
+# Larry's rotation is 2 light plates and 2 dark. White type is invisible on a
+# light plate, so the ink flips with the plate. The chip keeps its charcoal fill
+# in both: a dark chip reads fine on a light ground and it is the one accent
+# that should not change between templates.
+INK = {
+    "dark":  dict(head=C_WHITE,    body=C_SILVER,  rule=C_WHITE,    chip_text=C_WHITE),
+    "light": dict(head=C_CHARCOAL, body="#4A4A48", rule=C_CHARCOAL, chip_text=C_WHITE),
+}
+
+# A 9:16 cover is 1080x1920, but Instagram's profile grid does not show all of
+# it. Dale measured the live grid tiles at 305x405 px, a 3:4 ratio, so the grid
+# centre-crops to 1080x1440 and discards 240 off the top and 240 off the bottom.
 #
-# 420/1920 = 0.21875. Keeping the whole text block between these two lines means
-# any centre crop, square or 4:5, keeps the headline whole.
-CROP_SAFE = 0.219
+# The portrait layout used to start its text at 0.048*H = y92, deep inside the
+# discarded strip, so on the grid the headline was sliced: PLAN BROKE? read as
+# BROKE?, CASH GONE? lost CASH. That has the same visual signature as the
+# truncated on-screen text the whole library was reset over.
+#
+# 240/1920 = 0.125. Keep the entire text block, headline AND sub-header, between
+# these lines and the grid tile shows it whole.
+#
+# 3:4 is the tightest crop in play, so satisfying it also satisfies Pinterest at
+# 2:3 (which keeps y150..1770) and the full 9:16 view. The one surface it does
+# NOT cover is a true 1:1 square, which would keep only y420..1500 - if a square
+# crop ever turns up, this constant is where to change it.
+CROP_SAFE = 0.125
 
 # A bare stopword stranded on its own headline line reads as a mistake.
 STOP = set("A AN THE TO OF AND OR IS ARE ON IN FOR AT BY IT MY YOUR NO WE OUR".split())
@@ -233,7 +249,7 @@ def resolve_fonts(font_dir, want="auto"):
     return None, None
 
 
-def render(plate, headline, eyebrow, body, template, fonts, out_path):
+def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"):
     im = plate
     W, H = im.size
     land = W > H
@@ -243,6 +259,7 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
         return max(0, round(v))
 
     el = TEMPLATES.get(template, TEMPLATES["T1"])
+    pal = INK.get(ink, INK["dark"])
     show_eyebrow = el["eyebrow"] and bool(eyebrow)
     show_body = el["body"] and bool(body)
     # The rule is a SEPARATOR, so it only earns its place when there is something under it to
@@ -380,20 +397,20 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path):
         cc = cap_height(chip_font)
         d.text(
             (colX + chip_pad, y + (chipH - cc) // 2 - chip_font.getbbox("H")[1]),
-            eyebrow, font=chip_font, fill=C_WHITE,
+            eyebrow, font=chip_font, fill=pal["chip_text"],
         )
         y += chipH + gap
     for i, l in enumerate(h_lines):
-        d.text((colX, y + i * h_lh - head_font.getbbox("H")[1]), l, font=head_font, fill=C_WHITE)
+        d.text((colX, y + i * h_lh - head_font.getbbox("H")[1]), l, font=head_font, fill=pal["head"])
     y += (h_n - 1) * h_lh + h_cap
     if show_rule:
         y += rule_gap
-        d.rectangle([colX, y, colX + ruleW, y + ruleH], fill=C_WHITE)
+        d.rectangle([colX, y, colX + ruleW, y + ruleH], fill=pal["rule"])
         y += ruleH
     if show_body:
         y += rule_gap
         for i, l in enumerate(lines):
-            d.text((colX, y + i * b_lh - body_font.getbbox("H")[1]), l, font=body_font, fill=C_SILVER)
+            d.text((colX, y + i * b_lh - body_font.getbbox("H")[1]), l, font=body_font, fill=pal["body"])
 
     im.save(out_path)
     return dict(
@@ -412,6 +429,8 @@ def main():
     p.add_argument("--body", default="")
     p.add_argument("--template", default="T2")
     p.add_argument("--font-dir", default="fonts")
+    p.add_argument("--ink", default="dark", choices=sorted(INK),
+                   help="dark = light type for the dark plates; light = dark type for the light plates")
     p.add_argument("--font-set", default="auto", choices=["auto"] + list(FONT_SETS),
                    help="auto prefers Sohne when it is deployed, else falls back to Inter")
     a = p.parse_args()
@@ -430,7 +449,7 @@ def main():
         print("[cover] snapped to master %dx%d" % plate.size)
     info = render(
         plate, a.headline.strip(), a.eyebrow.strip(), a.body.strip(),
-        a.template.strip().upper(), fonts, a.out,
+        a.template.strip().upper(), fonts, a.out, a.ink,
     )
     print("[cover] wrote %s  headline %dpx on %d lines, body %dpx on %d lines"
           % (a.out, info["headline_size"], info["headline_lines"],
