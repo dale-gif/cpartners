@@ -281,7 +281,7 @@ def px_floor_min(floor):
     return int(floor * 0.62)
 
 
-def clear_width(plate, x0, y0, y1, floor, limit):
+def clear_width(plate, x0, y0, y1, floor, limit, cutoff=None):
     """How far right the sub-header can run before the photo swallows it.
 
     On a DARK plate the copy is white and the plate is dark everywhere, so the
@@ -314,7 +314,7 @@ def clear_width(plate, x0, y0, y1, floor, limit):
             v = px[x, y]
             if v < darkest:
                 darkest = v
-        if darkest < CLEAR_MIN:
+        if darkest < (CLEAR_MIN if cutoff is None else cutoff):
             break
         x += step
     # The floor is a sanity stop, NOT a licence to overrule the measurement.
@@ -371,6 +371,29 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
         band, chip_f, body_f, body_floor, max_body, lock = 0.225, 0.039, 0.0198, 0.017, 3, 0.135
         # The sub-header wraps NARROWER than the headline on the reference, which is the
         # only reason bodyW exists rather than everything sharing colW.
+        # HEADLINE WIDTH, LIGHT PLATES ONLY.
+        #
+        # On a dark plate the headline crosses the subject on purpose - that is
+        # the approved reference, and confining it once already cost 40% of the
+        # size. A light plate is different: charcoal over a face reads as the
+        # type sitting ON the presenter rather than beside her, and Larry called
+        # it out on Natalie.
+        #
+        # Why it only shows on some covers: a 2-word headline sets huge and each
+        # line runs nearly the full column, straight across the face. A 4-word
+        # headline wraps into shorter lines that stop short of her - which is
+        # exactly why Larry liked Stacy's NOT THE SAME THING and not Natalie's
+        # CLOSE HOW?. Capping the column forces the shorter-line structure
+        # regardless of word count.
+        #
+        # Judged at a lower cutoff than the sub-header: 150-250px type carries
+        # over a mid-tone that would swallow 38px body copy.
+        if ink == "light":
+            colW = clear_width(
+                im, colX, px(0.22 * H), px(0.60 * H),
+                floor=px(0.40 * W), limit=colW, cutoff=110,
+            )
+
         bodyW = px(0.580 * W)
         if ink == "light":
             # The band the sub-header can occupy: under the headline, above the
