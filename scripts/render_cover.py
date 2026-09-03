@@ -276,6 +276,11 @@ def resolve_fonts(font_dir, want="auto"):
     return None, None
 
 
+def px_floor_min(floor):
+    """Absolute narrowest column we will ever set, well under the soft floor."""
+    return int(floor * 0.62)
+
+
 def clear_width(plate, x0, y0, y1, floor, limit):
     """How far right the sub-header can run before the photo swallows it.
 
@@ -301,14 +306,25 @@ def clear_width(plate, x0, y0, y1, floor, limit):
     x = x0
     while x < limit:
         darkest = 255
-        for y in range(y0, y1, 3):
+        # EVERY row, not every third. Subsampling missed single-pixel strands
+        # of hair and left Natalie at 119 and Paul at 99 behind the tail of a
+        # line - the guard reported clear because it had not looked at the row
+        # that mattered. The band is only a few hundred rows; the cost is noise.
+        for y in range(y0, y1):
             v = px[x, y]
             if v < darkest:
                 darkest = v
         if darkest < CLEAR_MIN:
             break
         x += step
-    return max(floor, min(limit, x - x0 - step))
+    # The floor is a sanity stop, NOT a licence to overrule the measurement.
+    # It used to be max(floor, measured), which meant that when a plate genuinely
+    # offered less clear width than the floor, the floor won and the tail of each
+    # line was pushed onto dark ground anyway - Paul's plate offers ~353px here,
+    # the floor forced 367, and the last word sat on luminance 99. Honour the
+    # measurement; the floor only catches a pathological reading.
+    measured = min(limit, x - x0 - step)
+    return measured if measured >= floor else max(px_floor_min(floor), measured)
 
 
 def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"):
@@ -360,6 +376,12 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
             # The band the sub-header can occupy: under the headline, above the
             # lockup. Deliberately generous - the exact y is not known until the
             # headline has been sized, and a wider band only makes this stricter.
+            # The band the sub-header occupies. Fixed, and correct again now that
+            # the drop is dark-only: a light plate's copy sits exactly where it
+            # always did. If HEAD_DROP is ever extended to light plates this
+            # MUST become a two-pass measurement - where the body lands depends
+            # on the drop, which depends on the slack, which depends on the
+            # body's line count, which depends on this width.
             bodyW = clear_width(
                 im, colX, px(0.36 * H), px(0.64 * H),
                 floor=px(0.34 * W), limit=bodyW,
@@ -494,7 +516,19 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
     # any value rather than only at the values that happen to have been tested.
     pad = px(0.02 * H)
     slack = max(0, areaH - block - tail - pad)
-    y = top + min(px(HEAD_DROP * H), slack)
+    # DARK PLATES ONLY, for now.
+    #
+    # On a dark plate the copy is white and the sub-header may cross the subject
+    # freely, so the stack can drop with no side effects: the column stays its
+    # full 0.580W and the sentence still sets in three lines.
+    #
+    # A light plate cannot. Dropping it pushes the charcoal sub-header down into
+    # the presenter's arms and hands, clear_width correctly narrows the column to
+    # keep the words legible, and the copy becomes a tall 8-line ribbon - the
+    # opposite of the wider sub-header Larry asked for in the same breath. Making
+    # that work needs the two-pass described above, not a wider tolerance.
+    eff_drop = HEAD_DROP if ink != "light" else 0.0
+    y = top + min(px(eff_drop * H), slack)
     if not show_eyebrow:
         y += above          # keep the reserved slot empty, same baseline as a chipped cover
     if show_eyebrow:
