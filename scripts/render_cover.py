@@ -55,6 +55,11 @@ INK = {
 # crop ever turns up, this constant is where to change it.
 CROP_SAFE = 0.125
 
+# Luminance below which charcoal type stops reading. The body ink is #4A4A48
+# (74), so 150 leaves a comfortable margin without treating ordinary shading on
+# a pale wall as an obstacle.
+CLEAR_MIN = 150
+
 # A bare stopword stranded on its own headline line reads as a mistake.
 STOP = set("A AN THE TO OF AND OR IS ARE ON IN FOR AT BY IT MY YOUR NO WE OUR".split())
 
@@ -249,6 +254,41 @@ def resolve_fonts(font_dir, want="auto"):
     return None, None
 
 
+def clear_width(plate, x0, y0, y1, floor, limit):
+    """How far right the sub-header can run before the photo swallows it.
+
+    On a DARK plate the copy is white and the plate is dark everywhere, so the
+    sub-header can cross the subject freely - that is the design, and the
+    headline does it deliberately.
+
+    A LIGHT plate breaks that assumption. The type is charcoal, and it stays
+    legible over the pale wall but disappears completely into anything dark in
+    the photograph. Natalie's first live cover lost the last word of two lines
+    to her hair: the plate fell to luminance 77 and the text is 74, so the
+    glyphs were drawn at full strength onto a background of their own colour.
+    It read as truncated copy, which is the exact fault the library was reset
+    over - and darkening the ink to "fix the contrast" makes it worse.
+
+    So measure the plate instead of guessing. Walk right from the text margin
+    and stop at the first column whose darkest pixel in the sub-header band
+    would not hold the type. Returns a width, clamped so a busy plate cannot
+    squeeze the copy into a ribbon.
+    """
+    px = plate.convert("L").load()
+    step = 4
+    x = x0
+    while x < limit:
+        darkest = 255
+        for y in range(y0, y1, 3):
+            v = px[x, y]
+            if v < darkest:
+                darkest = v
+        if darkest < CLEAR_MIN:
+            break
+        x += step
+    return max(floor, min(limit, x - x0 - step))
+
+
 def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"):
     im = plate
     W, H = im.size
@@ -294,6 +334,14 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
         # The sub-header wraps NARROWER than the headline on the reference, which is the
         # only reason bodyW exists rather than everything sharing colW.
         bodyW = px(0.580 * W)
+        if ink == "light":
+            # The band the sub-header can occupy: under the headline, above the
+            # lockup. Deliberately generous - the exact y is not known until the
+            # headline has been sized, and a wider band only makes this stricter.
+            bodyW = clear_width(
+                im, colX, px(0.36 * H), px(0.64 * H),
+                floor=px(0.34 * W), limit=bodyW,
+            )
 
     area_lock = lock if land else max(lock, CROP_SAFE)
     areaH = (H - px(area_lock * H)) - top
