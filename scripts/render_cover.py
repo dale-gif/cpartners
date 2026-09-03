@@ -55,6 +55,16 @@ INK = {
 # crop ever turns up, this constant is where to change it.
 CROP_SAFE = 0.125
 
+# Clearing the crop is not the same as looking right inside it. CROP_SAFE alone
+# started the text block at exactly y240, the crop line itself, so on the grid
+# the eyebrow chip sat flush against the top edge of the tile with nothing above
+# it - Dale flagged Paul's VOLUNTARY LIQUIDATION chip, but it was every cover.
+#
+# 0.035*H = 67px, about 5% of the 1440px tile, which reads as a deliberate
+# margin rather than a near miss. Taken off the top of the text area, so the
+# block still ends clear of the lockup.
+TOP_HEADROOM = 0.035
+
 # Luminance below which charcoal type stops reading. The body ink is #4A4A48
 # (74), so 150 leaves a comfortable margin without treating ordinary shading on
 # a pale wall as an obstacle.
@@ -329,7 +339,7 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
         #
         # colX 0.071 is the plate's OWN margin - CRP_*_0916_* bake their lockup rule from
         # x=0.0546W and the Themis mark from 0.0537W, so copy and lockup share a left edge.
-        colX, colW, top = px(0.071 * W), px(0.760 * W), px(CROP_SAFE * H)
+        colX, colW, top = px(0.071 * W), px(0.760 * W), px((CROP_SAFE + TOP_HEADROOM) * H)
         band, chip_f, body_f, body_floor, max_body, lock = 0.225, 0.039, 0.0198, 0.017, 3, 0.135
         # The sub-header wraps NARROWER than the headline on the reference, which is the
         # only reason bodyW exists rather than everything sharing colW.
@@ -342,6 +352,17 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
                 im, colX, px(0.36 * H), px(0.64 * H),
                 floor=px(0.34 * W), limit=bodyW,
             )
+            # A narrower column earns more lines. max_body is a 3-line budget
+            # tuned for the full 0.580W width, and the fitting loop below CUTS
+            # the sentence at that budget rather than overflowing - so keeping 3
+            # here would silently drop the last words of any sub-header that no
+            # longer fits, which is the exact truncation this whole change set
+            # exists to stop. Paul lost "for everything that follows" that way.
+            #
+            # Scale the budget by how much width was given up, capped at 6.
+            # There is room: the text block ends around y1058 and the lockup does
+            # not start until y1661.
+            max_body = min(6, -(-max_body * px(0.580 * W) // max(1, bodyW)))
 
     area_lock = lock if land else max(lock, CROP_SAFE)
     areaH = (H - px(area_lock * H)) - top
