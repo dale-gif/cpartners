@@ -65,18 +65,6 @@ CROP_SAFE = 0.125
 # block still ends clear of the lockup.
 TOP_HEADROOM = 0.035
 
-# How far to push the whole text stack down, as a fraction of frame height.
-# Spends the slack that already sits below the block, so the headline keeps its
-# size - unlike raising TOP_HEADROOM, which shrinks the title band.
-# Clamped at render time to whatever slack actually exists, so a tall block
-# (a 5-line sub-header, say) simply drops less rather than colliding with the
-# lockup. 0 restores the previous top-anchored behaviour exactly.
-#
-# 0.30 chosen by Larry, 3 Sep. Measured across all four presenters on the live
-# Drive plates it is the smallest value that clears every face: Paul's sits
-# high enough for 9-18%, but Lisa, Natalie and Stacy all need ~30%.
-HEAD_DROP = 0.30
-
 # Luminance below which charcoal type stops reading. The body ink is #4A4A48
 # (74), so 150 leaves a comfortable margin without treating ordinary shading on
 # a pale wall as an obstacle.
@@ -469,32 +457,8 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
     h_cap = cap_height(head_font)
     h_lh = px(h_size * 1.02)
 
-    # Stack, top anchored, then dropped by whatever slack is going spare.
-    #
-    # Larry asked for the large text lower so it does not chop the face. The
-    # block is shorter than areaH, so it can slide down into its own unused
-    # bottom margin with no effect on the type size. Measure the block first,
-    # then take the smaller of the requested drop and the real slack - that is
-    # what stops a tall sub-header being pushed onto the lockup.
-    block = above
-    block += (h_n - 1) * h_lh + h_cap
-    if show_rule:
-        block += rule_gap + ruleH
-    if show_body:
-        block += gap + bodyH
-    # bodyH is measured to CAP HEIGHT, so descenders hang below it - at 30% drop
-    # Paul's "you stay ahead of it" put ink 18px past the crop line while this
-    # said there was room. Reserve the real descent of the last line's font.
-    tail_font = body_font if show_body else head_font
-    tail = tail_font.getmetrics()[1] if tail_font else 0
-    # Plus a pad, because `block` is a sum of MEASURED parts (cap heights, line
-    # advances) and the real ink extent does not match it exactly - glyph boxes
-    # sit differently from cap heights. Reserving the descent alone still left
-    # Paul 7px past the crop line at a 30% drop. The pad makes the dial safe at
-    # any value rather than only at the values that happen to have been tested.
-    pad = px(0.02 * H)
-    slack = max(0, areaH - block - tail - pad)
-    y = top + min(px(HEAD_DROP * H), slack)
+    # Stack, top anchored.
+    y = top
     if not show_eyebrow:
         y += above          # keep the reserved slot empty, same baseline as a chipped cover
     if show_eyebrow:
