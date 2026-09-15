@@ -1,5 +1,5 @@
 """Generate per-video review titles from the actual finished audio, never topic names."""
-import json, os, re, subprocess, tempfile, time
+import json, os, re, subprocess, tempfile, time, hashlib
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 import requests
@@ -13,12 +13,16 @@ def validate_item(item):
         raise ValueError('Invalid content ID')
     if not re.fullmatch(r'[A-Za-z0-9_-]{15,}',drive):
         raise ValueError('Invalid Drive ID')
-    u=urlparse(item.get('source_url',''))
-    if u.scheme!='https' or u.netloc!='github.com' or not u.path.startswith('/dale-gif/cpartners/releases/download/crp-render-'):
-        raise ValueError('Source must be an existing CRP render release')
-    filename=unquote(u.path.rsplit('/',1)[-1])
-    if not filename.startswith(asset+'_CRP_') or not filename.endswith('.mp4'):
-        raise ValueError('Source filename does not match content ID')
+    if item.get('source_mode')=='drive':
+        if not re.fullmatch(r'[a-f0-9]{64}',str(item.get('sha256',''))):
+            raise ValueError('Drive download requires registered SHA-256')
+    else:
+        u=urlparse(item.get('source_url',''))
+        if u.scheme!='https' or u.netloc!='github.com' or not u.path.startswith('/dale-gif/cpartners/releases/download/crp-render-'):
+            raise ValueError('Source must be an existing CRP render release')
+        filename=unquote(u.path.rsplit('/',1)[-1])
+        if not filename.startswith(asset+'_CRP_') or not filename.endswith('.mp4'):
+            raise ValueError('Source filename does not match content ID')
     size=int(item.get('size',0))
     if not 0<size<=500_000_000: raise ValueError('Invalid video size')
     return size
@@ -70,13 +74,21 @@ def main():
     for index,item in enumerate(items):
         with tempfile.TemporaryDirectory() as tmp:
             video=Path(tmp)/'video.mp4';audio=Path(tmp)/'audio.mp3'
-            r=requests.get(item['source_url'],stream=True,timeout=(20,120));r.raise_for_status()
-            total=0
-            with video.open('wb') as f:
-                for chunk in r.iter_content(1024*1024):
-                    total+=len(chunk)
-                    if total>500_000_000: raise ValueError('Video exceeds size limit')
-                    f.write(chunk)
+            if item.get('source_mode')=='drive':
+                import gdown
+                if not gdown.download(id=item['drive_id'],output=str(video),quiet=True,use_cookies=False):
+                    raise ValueError('Finished video is not downloadable from Drive')
+                total=video.stat().st_size
+                with video.open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
+                if digest!=item['sha256']: raise ValueError('Drive video SHA-256 differs from registered render')
+            else:
+                r=requests.get(item['source_url'],stream=True,timeout=(20,120));r.raise_for_status()
+                total=0
+                with video.open('wb') as f:
+                    for chunk in r.iter_content(1024*1024):
+                        total+=len(chunk)
+                        if total>500_000_000: raise ValueError('Video exceeds size limit')
+                        f.write(chunk)
             if total!=int(item['size']): raise ValueError('Downloaded bytes differ from registered render')
             subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-i',str(video),'-vn','-ac','1','-ar','16000','-b:a','32k',str(audio)],check=True,timeout=180)
             if audio.stat().st_size>=24_000_000: raise ValueError('Audio exceeds transcription limit')
