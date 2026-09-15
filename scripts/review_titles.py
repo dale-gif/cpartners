@@ -64,9 +64,24 @@ def main():
     if not isinstance(items,list) or not 1<=len(items)<=25: raise ValueError('Expected 1-25 videos')
     if len({x.get('id') for x in items})!=len(items): raise ValueError('Duplicate input content IDs')
     for item in items: validate_item(item)
+    out=Path('out');out.mkdir(exist_ok=True)
+    # A repeated dispatch for the same immutable batch reuses its completed result.
+    existing=requests.get('https://api.github.com/repos/dale-gif/cpartners/releases/tags/review-titles-'+batch,timeout=30)
+    if existing.status_code==200:
+        asset=next((a for a in existing.json().get('assets',[]) if a['name']=='review-titles.json'),None)
+        if not asset: raise ValueError('Existing title release has no result asset')
+        expected_url='https://github.com/dale-gif/cpartners/releases/download/review-titles-'+batch+'/review-titles.json'
+        if asset['browser_download_url']!=expected_url: raise ValueError('Unexpected cached result URL')
+        cached_response=requests.get(expected_url,timeout=30);cached_response.raise_for_status();cached=cached_response.json()
+        if cached.get('complete') is not True or cached.get('batch_id')!=batch or {(x['id'],x['drive_id']) for x in cached.get('items',[])}!={(x['id'],x['drive_id']) for x in items}:
+            raise ValueError('Existing batch result does not match requested videos')
+        (out/'review-titles.json').write_text(json.dumps(cached,ensure_ascii=False,indent=2))
+        with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('batch_id='+batch+'\n')
+        print('Reused completed transcript title batch.',flush=True)
+        return
+    if existing.status_code!=404: existing.raise_for_status()
     openai=os.environ['OPENAI_API_KEY']; anthropic=os.environ['ANTHROPIC_API_KEY']
     output=[]; used=set(str(t) for t in payload.get('exclude_titles',[]) if isinstance(t,str))
-    out=Path('out');out.mkdir(exist_ok=True)
     def claude(prompt):
         r=requests.post('https://api.anthropic.com/v1/messages',headers={'x-api-key':anthropic,'anthropic-version':'2023-06-01'},json={'model':'claude-sonnet-4-6','max_tokens':300,'system':'You write accurate, clear video titles. Respond with strict JSON.','messages':[{'role':'user','content':prompt}]},timeout=90)
         r.raise_for_status()
