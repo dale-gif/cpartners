@@ -35,3 +35,11 @@ jobs:
           files: out/review-titles.json
           fail_on_unmatched_files: true
           make_latest: false
+      - name: Retain completed title records for recovery
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-review-titles
+          path: out/review-titles.json
+          if-no-files-found: ignore
+          retention-days: 7
