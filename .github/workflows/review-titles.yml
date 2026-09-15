@@ -1,0 +1,37 @@
+name: CRP Transcript Review Titles
+on:
+  repository_dispatch:
+    types: [crp-review-titles]
+permissions:
+  contents: write
+concurrency:
+  group: review-titles-${{ github.event.client_payload.batch_id }}
+  cancel-in-progress: false
+jobs:
+  titles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install audio tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install requests
+      - name: Transcribe finished videos and generate specific titles
+        id: titles
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/review_titles.py
+      - name: Publish title metadata
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: review-titles-${{ steps.titles.outputs.batch_id }}
+          name: Review titles — ${{ steps.titles.outputs.batch_id }}
+          files: out/review-titles.json
+          fail_on_unmatched_files: true
+          make_latest: false
