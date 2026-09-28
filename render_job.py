@@ -630,7 +630,35 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
                                    INFOGRAPHIC_HOLD,
                                    min_hold=INFOGRAPHIC_HOLD_MIN,
                                    max_hold=INFOGRAPHIC_HOLD_MAX)
-    plan["text_overlays"] = _guard(plan.get("text_overlays"), "text_overlays",
+    def _drop_blank_overlays(items: list) -> list:
+        """Remove overlays the planner left with no words.
+
+        A blank overlay would draw nothing anyway, but the text renderers size
+        themselves with max() over their measured lines, and max() of an empty
+        sequence raises. On 2026-09-28 CRP-C-260922-12-MV2-P died at [5/5]
+        composite with "max() iterable argument is empty" after the planner
+        returned two overlays with lines=[]; the render had already paid for
+        download, whisper and planning by then.
+
+        There are nine such max() sites across the renderers. Dropping the
+        empty overlay once, here, removes the whole class rather than guarding
+        each of them.
+        """
+        kept, blank = [], []
+        for it in items or []:
+            lines = [str(l).strip() for l in (it.get("lines") or []) if str(l).strip()]
+            if not lines:
+                blank.append(float(it.get("timestamp", -1)))
+                continue
+            it["lines"] = lines
+            kept.append(it)
+        if blank:
+            log(f"dropped {len(blank)} blank text_overlays with no words "
+                f"at t={blank}")
+        return kept
+
+    plan["text_overlays"] = _guard(_drop_blank_overlays(plan.get("text_overlays")),
+                                    "text_overlays",
                                     OVERLAY_HOLD, min_hold=MIN_OVERLAY_HOLD,
                                     max_hold=MAX_OVERLAY_HOLD)
 
