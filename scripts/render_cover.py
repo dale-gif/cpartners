@@ -365,7 +365,13 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
         # shrink further to make two, and hitting the floor means the sentence gets
         # TRUNCATED, which is worse than small type. 0.016 is the smallest that still
         # reads at 1080 and gives the wrapper enough room to avoid cutting words.
-        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.016, 2, 0.215
+        #
+        # lock reserves the bottom band for the lockup baked into the plate, which starts
+        # at y=0.7936 (Themis 0.7936-0.8846, bar 0.8396, CRP 0.8227-0.8555). 0.215 cleared
+        # the overlap but left only 15px between the last line of copy and the Themis
+        # figure - legally clear, visually touching, which is what Larry flagged. 0.26
+        # measures 71px of real air on a 1080 cover.
+        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.016, 2, 0.26
         bodyW = colW
     else:
         # 9:16 measured off Mohi's approved reference (2026-08-28), by solving font sizes
