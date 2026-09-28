@@ -67,8 +67,16 @@ def _measure(text, font, draw):
 
 
 def build_word_boxes(full_text, font_dir):
-    """Compute per-word screen positions. Returns (font, [ (word, x, y) ])."""
+    """Compute per-word screen positions. Returns (font, [ (word, x, y) ]).
+
+    An overlay with no words returns no boxes rather than raising. The planner
+    occasionally emits a text overlay with an empty `lines` array, and the old
+    behaviour was `max()` over an empty sequence, which killed the whole render
+    for one blank card. A blank overlay should draw nothing, not stop the job.
+    """
     words = full_text.upper().split()
+    if not words:
+        return _load_font(Path(font_dir), MIN_SIZE), []
     scratch = Image.new("RGBA", (W, H))
     draw = ImageDraw.Draw(scratch)
 
@@ -131,6 +139,9 @@ def render_clip(full_text, font_dir, out_dir, seconds):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     font, boxes = build_word_boxes(full_text, Path(font_dir))
+    if not boxes:
+        print(f"anim_big_text: no words in overlay, emitting {int(seconds * FPS)} "
+              f"black frames instead of failing")
     n = int(seconds * FPS)
     for f in range(n):
         t = f / FPS

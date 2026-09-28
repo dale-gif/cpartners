@@ -463,6 +463,42 @@ def whisper_transcribe(audio: Path) -> dict:
     return normalise_transcript(r.json())
 
 
+def _loads_tolerant(raw: str, what: str) -> dict:
+    """json.loads, but survive the small syntax slips a language model makes.
+
+    The planner is an LLM, so its output is *usually* valid JSON. A trailing
+    comma or a smart quote fails the whole render for a runner that has already
+    done the expensive work. Observed in production on 2026-09-28:
+    "JSONDecodeError: Expecting property name enclosed in double quotes".
+
+    Tries strict first, so a well-formed plan is never altered. Only reaches
+    for repairs when strict parsing has already failed.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as first:
+        repaired = raw
+        # Smart quotes around keys/values.
+        for bad, good in (("“", '"'), ("”", '"'),
+                          ("‘", "'"), ("’", "'")):
+            repaired = repaired.replace(bad, good)
+        # Trailing commas before a closing brace or bracket.
+        repaired = re.sub(r",(\s*[}\]])", r"\1", repaired)
+        # Unquoted object keys:  { foo: 1 }  ->  { "foo": 1 }
+        repaired = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', repaired)
+        try:
+            plan = json.loads(repaired)
+            log(f"  JSON REPAIR: {what} was malformed and was repaired "
+                f"({first.msg} at char {first.pos})")
+            return plan
+        except json.JSONDecodeError as second:
+            raise RuntimeError(
+                f"{what}: planner returned JSON that could not be parsed or "
+                f"repaired. strict={first.msg} at char {first.pos}; "
+                f"repaired={second.msg} at char {second.pos}"
+            ) from second
+
+
 def claude_plan(transcript: dict, duration: float, fmt: str,
                 infographic_count: int, overlay_count: int) -> dict:
     safe_end = max(0.0, duration - OUTRO_RESERVED_SECONDS)
@@ -520,7 +556,7 @@ def claude_plan(transcript: dict, duration: float, fmt: str,
     first, last = text.find("{"), text.rfind("}")
     if first == -1 or last == -1:
         raise RuntimeError("No JSON object in Claude output")
-    plan = json.loads(text[first : last + 1])
+    plan = _loads_tolerant(text[first : last + 1], "MF planner")
 
     # Safety net: drop anything that would land on top of the outro. For items
     # that start before the outro but would run past it, clip the hold so the
@@ -855,7 +891,7 @@ def sf_plan(transcript: dict, duration: float) -> dict:
     first, last = text.find("{"), text.rfind("}")
     if first == -1 or last == -1:
         raise RuntimeError("No JSON object in SF planner output")
-    plan = json.loads(text[first : last + 1])
+    plan = _loads_tolerant(text[first : last + 1], "SF planner")
 
     kept, dropped, punchy_seen, trimmed = [], 0, False, 0
     for ov in plan.get("text_overlays") or []:

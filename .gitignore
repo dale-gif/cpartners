@@ -1,1 +1,8 @@
 __pycache__/
+anchors/input/
+node_modules/
+
+# never commit credentials to this repo - it is public
+.opusclip-key
+credentials/
+*.bak-*
