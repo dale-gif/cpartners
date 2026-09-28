@@ -463,6 +463,10 @@ def whisper_transcribe(audio: Path) -> dict:
     return normalise_transcript(r.json())
 
 
+class PlannerJSONError(RuntimeError):
+    """The planner returned JSON that survived neither strict parsing nor repair."""
+
+
 def _loads_tolerant(raw: str, what: str) -> dict:
     """json.loads, but survive the small syntax slips a language model makes.
 
@@ -492,11 +496,45 @@ def _loads_tolerant(raw: str, what: str) -> dict:
                 f"({first.msg} at char {first.pos})")
             return plan
         except json.JSONDecodeError as second:
-            raise RuntimeError(
+            # Print the text either side of the break. Without it the only way
+            # to learn what the planner actually emitted is to reproduce the
+            # run, and the planner is nondeterministic so that rarely works.
+            lo = max(0, first.pos - 120)
+            hi = min(len(raw), first.pos + 120)
+            raise PlannerJSONError(
                 f"{what}: planner returned JSON that could not be parsed or "
                 f"repaired. strict={first.msg} at char {first.pos}; "
-                f"repaired={second.msg} at char {second.pos}"
+                f"repaired={second.msg} at char {second.pos}\n"
+                f"  ...{raw[lo:first.pos]}>>>BREAK>>>{raw[first.pos:hi]}..."
             ) from second
+
+
+PLANNER_ATTEMPTS = 3
+
+
+def _plan_with_retry(fn, what: str, *args, **kwargs) -> dict:
+    """Call an LLM planner, asking again when it returns unparseable JSON.
+
+    The planner is nondeterministic, so a malformed reply is usually a one-off
+    rather than a property of the video. On 2026-09-28 CRP-C-260923-12-MV2-L
+    died here while a *larger* plan for CRP-D-260817-012-MV2-P had succeeded
+    minutes earlier on the same commit, which rules out size.
+
+    By this point the run has already downloaded the source, extracted audio
+    and paid for whisper, so throwing all of that away over one bad reply is
+    the expensive choice. Only unparseable JSON is retried - a bad API key or
+    an HTTP error still fails immediately.
+    """
+    for attempt in range(1, PLANNER_ATTEMPTS + 1):
+        try:
+            return fn(*args, **kwargs)
+        except PlannerJSONError as exc:
+            if attempt == PLANNER_ATTEMPTS:
+                raise
+            log(f"  {what}: unparseable JSON on attempt {attempt} of "
+                f"{PLANNER_ATTEMPTS}, asking again")
+            log(f"    {str(exc).splitlines()[0]}")
+    raise AssertionError("unreachable")
 
 
 def claude_plan(transcript: dict, duration: float, fmt: str,
@@ -945,7 +983,7 @@ def render_sf_portrait(video: Path, audio: Path, w: int, h: int) -> None:
     transcript = whisper_transcribe(audio)
     (WORK / "whisper.json").write_text(json.dumps(transcript))
 
-    plan = sf_plan(transcript, duration)
+    plan = _plan_with_retry(sf_plan, "SF planner", transcript, duration)
     (WORK / "plan.json").write_text(json.dumps(plan, indent=2))
     for i, ov in enumerate(plan.get("text_overlays") or []):
         log(f"  OST {i}: t={ov.get('timestamp')}s punchy={bool(ov.get('punchy'))} "
@@ -994,7 +1032,8 @@ def main() -> None:
     (WORK / "whisper.json").write_text(json.dumps(transcript))
 
     log("[4/5] claude planner")
-    plan = claude_plan(transcript, duration, fmt, card_count, overlay_count)
+    plan = _plan_with_retry(claude_plan, "MF planner",
+                            transcript, duration, fmt, card_count, overlay_count)
     (WORK / "plan.json").write_text(json.dumps(plan, indent=2))
     log(f"plan: {len(plan.get('infographics') or [])} cards, "
         f"{len(plan.get('text_overlays') or [])} overlays")
