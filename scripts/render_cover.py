@@ -353,7 +353,13 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
     # The bottom band is RESERVED for the lockup baked into the plate.
     if land:
         colX, colW, top = px(0.055 * W), px(0.46 * W), px(0.10 * H)
-        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.020, 3, 0.16
+        # lock is the share of the height reserved at the BOTTOM for the lockup that is
+        # baked into the plate. It was 0.16, which let type run to y=0.84. Measured off
+        # the approved plate the lockup actually starts at y=0.7936 (Themis 0.7936-0.8846,
+        # bar 0.8396, CRP 0.8227-0.8555), so a three-line sub-header was landing on the
+        # Themis figure with the progress bar struck through the last line. 0.215 keeps
+        # the whole block clear of the mark with a little breathing room.
+        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.020, 3, 0.215
         bodyW = colW
     else:
         # 9:16 measured off Mohi's approved reference (2026-08-28), by solving font sizes
