@@ -359,7 +359,13 @@ def render(plate, headline, eyebrow, body, template, fonts, out_path, ink="dark"
         # bar 0.8396, CRP 0.8227-0.8555), so a three-line sub-header was landing on the
         # Themis figure with the progress bar struck through the last line. 0.215 keeps
         # the whole block clear of the mark with a little breathing room.
-        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.020, 3, 0.215
+        # max_body is 2, not 3. Larry asked for the sub-header held to two rows so it
+        # keeps clear air above the Themis mark rather than sitting right on top of it.
+        # body_floor drops with it: a sentence that used to set on three lines needs to
+        # shrink further to make two, and hitting the floor means the sentence gets
+        # TRUNCATED, which is worse than small type. 0.016 is the smallest that still
+        # reads at 1080 and gives the wrapper enough room to avoid cutting words.
+        band, chip_f, body_f, body_floor, max_body, lock = 0.44, 0.052, 0.030, 0.016, 2, 0.215
         bodyW = colW
     else:
         # 9:16 measured off Mohi's approved reference (2026-08-28), by solving font sizes
