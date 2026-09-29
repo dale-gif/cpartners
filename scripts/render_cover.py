@@ -196,6 +196,14 @@ def balanced(text, n):
     if len(words) <= 1 or n <= 1:
         return [text]
     if n >= len(words):
+        # This shortcut used to return before the stopword guard below ever ran,
+        # so a short headline was always set one word per line no matter what it
+        # stranded: CLIENTS IN TROUBLE? came back as CLIENTS / IN / TROUBLE?,
+        # which is the exact orphan STOP exists to prevent. Refuse the split when
+        # it would strand one. The caller drops any result whose line count does
+        # not match the n it asked for, so it simply tries a different n.
+        if any(w.strip("?!.,").upper() in STOP for w in words):
+            return [text]
         return list(words)
     slots = len(words) - 1
     need = n - 1
