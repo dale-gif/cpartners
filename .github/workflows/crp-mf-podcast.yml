@@ -6,6 +6,9 @@ on:
       file_id:
         required: true
         type: string
+      source_asset_url:
+        required: false
+        type: string
       job_id:
         required: true
         type: string
@@ -27,8 +30,10 @@ jobs:
           python -m pip install gdown==5.2.0
       - name: Extract original MF audio into a private draft release
         env:
+          SOURCE_ASSET_URL: ${{ inputs.source_asset_url }}
           FILE_ID: ${{ inputs.file_id }}
           JOB_ID: ${{ inputs.job_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: python .github/scripts/prepare_mf_podcast.py
+
