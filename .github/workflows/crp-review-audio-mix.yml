@@ -101,8 +101,8 @@ jobs:
             echo "Using runner-provided ffmpeg and ffprobe"
           else
             echo "Installing missing audio tools with bounded network and lock waits"
-            timeout 120s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=30 update -qq
-            timeout 420s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=30 install -y -qq ffmpeg
+            timeout 120s sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=30 update -qq
+            timeout 420s sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=30 install -y --no-install-recommends ffmpeg
           fi
           ffmpeg -version | sed -n '1p'
           ffprobe -version | sed -n '1p'
