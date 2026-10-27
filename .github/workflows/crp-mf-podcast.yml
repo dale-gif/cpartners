@@ -25,9 +25,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          python -m pip install gdown==5.2.0
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout 240s apt-get install -y --no-install-recommends ffmpeg
+          fi
+          python -m pip install --timeout 30 gdown==5.2.0
       - name: Extract original MF audio into a private draft release
         env:
           SOURCE_ASSET_URL: ${{ inputs.source_asset_url }}
